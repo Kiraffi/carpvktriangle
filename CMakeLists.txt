@@ -13,6 +13,7 @@ add_subdirectory("external/SDL")
 
 
 target_link_libraries(carpvktriangle PRIVATE
-    carpvklib
-    volk
+    carpvk
+    vulkan
+    SDL3::SDL3
 )

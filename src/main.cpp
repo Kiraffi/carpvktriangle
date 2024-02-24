@@ -1,39 +1,75 @@
-//#include <vulkan/vulkan_core.h>
-#include <volk.h>
+#include <vulkan/vulkan_core.h>
+//#include <volk.h>
 #include <stdio.h>
 
 #include <carpvk.h>
 
-int main()
+#include <SDL3/SDL.h>
+#include "SDL_vulkan.h"
+#include "../external/carpvk/src/carpvk.h"
+
+struct State
 {
-    const char* extensions[] = {
-        //VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+    SDL_Window *window = nullptr;
+    CarpVk carpVk;
+    VulkanInstanceBuilder builder;
+};
+
+int sRun(State &state)
+{
+    CarpVk& carpVk = state.carpVk;
+
+    // Create window
+    SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL3
+
+    // Create an application window with the following settings:
+    state.window = SDL_CreateWindow(
+        "An SDL3 window",
+        1024,
+        768,
+        SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
+    );
+
+    // Check that the window was successfully created
+    if (state.window == NULL) {
+        // In the case that the window could not be made...
+        printf("Could not create window: %s\n", SDL_GetError());
+        return false;
+    }
+
+
+    const char* extensions[256] = {};
+    uint32_t extensionCount = 0;
+    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
+
+    for(int i = 0; i < extensionCount; ++i)
+    {
+        extensions[i] = sdlExtensions[i];
+    }
 #if NDEBUG
 #else
-        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+    extensions[extensionCount++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
 #endif
-        //VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-        //"VK_LAYER_KHRONOS_shader_object",
-        VK_KHR_SURFACE_EXTENSION_NAME,
-        //"VK_KHR_xlib_surface",
-        "VK_KHR_xcb_surface",
-    };
+
+    //VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+    //VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+    //VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
+    //"VK_LAYER_KHRONOS_shader_object",
+    // VK_KHR_SURFACE_EXTENSION_NAME,
+    //"VK_KHR_xlib_surface",
+    //"VK_KHR_xcb_surface",
 
 
-    if(!initVolk())
-    {
-        printf("Failed to init volk\n");
-        return 2;
-    }
     //printExtensions();
     //printLayers();
 
-    CarpVk carpVk;
 
     VulkanInstanceBuilder builder = instaceBuilder();
-    //instanceBuilderSetApplicationVersion(builder, 0, 1, 0);
-    instanceBuilderSetExtensions(builder, extensions, sizeof(extensions) / sizeof(const char*));
-    //instanceBuilderUseDefaultValidationLayers(builder);
+    instanceBuilderSetExtensions(builder, extensions, extensionCount);
+#if NDEBUG
+#else
+    instanceBuilderUseDefaultValidationLayers(builder);
+#endif
     if(!instanceBuilderFinish(builder, carpVk))
     {
         printf("Failed to initialize vulkan.\n");
@@ -41,5 +77,53 @@ int main()
     }
     printf("Success on creating instance\n");
 
+
+    VkSurfaceKHR surface;
+    if(SDL_Vulkan_CreateSurface(state.window, carpVk.instance, nullptr, &surface) == SDL_FALSE)
+    {
+        printf("Failed to create surface\n");
+        return 2;
+    }
+    if(surface == nullptr)
+    {
+        printf("Failed to create surface\n");
+        return 2;
+    }
+    carpVk.surface = surface;
+
+    if(!createPhysicalDevice(carpVk, false))
+    {
+        printf("Failed to create physical device\n");
+        return 3;
+    }
+
+    if(!createDeviceWithQueues(carpVk, builder))
+    {
+        printf("Failed to create logical device with queues\n");
+        return 4;
+    }
+
+    // The window is open: could enter program loop here (see SDL_PollEvent())
+
+    SDL_Delay(1000);  // Pause execution for 3000 milliseconds, for example
+    printf("success\n");
     return 0;
+}
+
+int main()
+{
+    State state;
+    int returnValue = sRun(state);
+
+    deinitCarpVk(state.carpVk);
+
+    // Close and destroy the window
+    SDL_DestroyWindow(state.window);
+
+    // Clean up
+    SDL_Quit();
+
+
+
+    return returnValue;
 }
