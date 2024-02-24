@@ -12,5 +12,6 @@ add_subdirectory("external/carpvk")
 
 
 target_link_libraries(carpvktriangle PRIVATE
-    carpvk
+    carpvklib
+    volk
 )
