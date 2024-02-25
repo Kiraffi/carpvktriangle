@@ -8,6 +8,10 @@
 #include "SDL_vulkan.h"
 #include "../external/carpvk/src/carpvk.h"
 
+#include <vector>
+#include <fstream>
+
+
 static const int SCREEN_WIDTH = 1024;
 static const int SCREEN_HEIGHT = 768;
 
@@ -16,10 +20,67 @@ struct State
     SDL_Window *window = nullptr;
     CarpVk carpVk;
     VulkanInstanceBuilder builder;
+
+
+    VkShaderEXT shaders[2];
 };
+
+static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
+{
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    if (!file.is_open())
+    {
+        printf("Failed to load file: %s\n", filename);
+        return false;
+    }
+
+    size_t fileSize = (size_t) file.tellg();
+    outBuffer.resize(fileSize);
+    file.seekg(0);
+    file.read(outBuffer.data(), fileSize);
+    file.close();
+
+    return true;
+}
+
+void sDeinitShaders(CarpVk& carpVk)
+{
+    PFN_vkDestroyShaderEXT vkDestroyShaderEXT{ VK_NULL_HANDLE };
+    vkDestroyShaderEXT = reinterpret_cast<PFN_vkDestroyShaderEXT>(vkGetDeviceProcAddr(carpVk.device, "vkDestroyShaderEXT"));
+    if(carpVk.destroyBuffersData == nullptr || vkDestroyShaderEXT == nullptr)
+    {
+        return;
+    }
+    State *state = (State *) carpVk.destroyBuffersData;
+    for (int i = 0; i < SDL_arraysize(state->shaders); ++i)
+    {
+        if(state->shaders[i] == nullptr)
+        {
+            continue;
+        }
+        vkDestroyShaderEXT(carpVk.device, state->shaders[i], nullptr);
+        state->shaders[i] = nullptr;
+    }
+}
+
 
 int sRun(State &state)
 {
+    std::vector<char> fragShader;
+    std::vector<char> vertShader;
+
+    if(!sReadFile("assets/shader/vert.spv", vertShader))
+    {
+        printf("Failed to read vertex shader\n");
+        return false;
+    }
+    if(!sReadFile("assets/shader/frag.spv", fragShader))
+    {
+        printf("Failed to read fragment shader\n");
+        return false;
+    }
+
     CarpVk& carpVk = state.carpVk;
 
     // Create window
@@ -111,6 +172,16 @@ int sRun(State &state)
         printf("Failed to create swapchain\n");
         return 5;
     }
+    if(!finalizeInit(carpVk))
+    {
+        printf("Failed to finialize initializing vulkan\n");
+        return 6;
+    }
+
+    carpVk.destroyBuffers = sDeinitShaders;
+    carpVk.destroyBuffersData = &state;
+
+
 
     // The window is open: could enter program loop here (see SDL_PollEvent())
 
@@ -119,9 +190,11 @@ int sRun(State &state)
     return 0;
 }
 
+
+
 int main()
 {
-    State state;
+    State state = {};
     int returnValue = sRun(state);
 
     deinitCarpVk(state.carpVk);
