@@ -8,6 +8,9 @@
 #include "SDL_vulkan.h"
 #include "../external/carpvk/src/carpvk.h"
 
+static const int SCREEN_WIDTH = 1024;
+static const int SCREEN_HEIGHT = 768;
+
 struct State
 {
     SDL_Window *window = nullptr;
@@ -25,8 +28,8 @@ int sRun(State &state)
     // Create an application window with the following settings:
     state.window = SDL_CreateWindow(
         "An SDL3 window",
-        1024,
-        768,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
     );
 
@@ -101,6 +104,12 @@ int sRun(State &state)
     {
         printf("Failed to create logical device with queues\n");
         return 4;
+    }
+
+    if(!createSwapchain(carpVk, VSyncType::IMMEDIATE_NO_VSYNC, SCREEN_WIDTH, SCREEN_HEIGHT))
+    {
+        printf("Failed to create swapchain\n");
+        return 5;
     }
 
     // The window is open: could enter program loop here (see SDL_PollEvent())
