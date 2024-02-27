@@ -25,7 +25,7 @@ static const int SCREEN_HEIGHT = 768;
 
 
 
-
+/*
 
 PFN_vkCreateShadersEXT vkCreateShadersEXT_T{ VK_NULL_HANDLE };
 PFN_vkDestroyShaderEXT vkDestroyShaderEXT_T{ VK_NULL_HANDLE };
@@ -59,7 +59,7 @@ PFN_vkCmdSetColorBlendEquationEXT vkCmdSetColorBlendEquationEXT_T = {};
 
 PFN_vkCmdSetVertexInputEXT vkCmdSetVertexInputEXT_T{ VK_NULL_HANDLE };
 
-
+*/
 
 
 
@@ -73,12 +73,17 @@ struct State
     CarpVk carpVk;
     VulkanInstanceBuilder builder;
 
-    VkDescriptorPool pool = nullptr;
-    VkDescriptorSetLayout layout = nullptr;
+    VkDescriptorPool pool = {};
+    VkDescriptorSetLayout descriptorSetLayout = {};
 
-    VkPipelineLayout pipeline = nullptr;
+    VkPipelineLayout pipelineLayout = {};
+    VkPipeline pipeline = {};
 
-    VkShaderEXT shaders[2];
+    VkShaderEXT shaders[2] = {};
+
+    VkShaderModule shaderModules[2] = {};
+
+    Image image = {};
 };
 
 static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
@@ -112,8 +117,11 @@ void sDeinitShaders(CarpVk& carpVk)
 
 
     State *state = (State *) carpVk.destroyBuffersData;
-    vkDestroyPipelineLayout(carpVk.device, state->pipeline, nullptr);
-    state->pipeline = nullptr;
+
+    destroyImage(carpVk, state->image);
+
+    vkDestroyPipelineLayout(carpVk.device, state->pipelineLayout, nullptr);
+    state->pipelineLayout = nullptr;
     for (int i = 0; i < SDL_arraysize(state->shaders); ++i)
     {
         if(state->shaders[i] == nullptr)
@@ -130,7 +138,7 @@ void sDeinitShaders(CarpVk& carpVk)
     }
 }
 
-
+#if 0
 bool sCreateShaders(State& state,
     const char* vertCode, int vertCodeSize,
     const char* fragCode, int fragCodeSize)
@@ -159,7 +167,7 @@ bool sCreateShaders(State& state,
     pipelineLayoutCreateInfo.setLayoutCount = 0;
     pipelineLayoutCreateInfo.pSetLayouts = nullptr;
 
-    VK_CHECK_CALL(vkCreatePipelineLayout(state.carpVk.device, &pipelineLayoutCreateInfo, nullptr, &state.pipeline));
+    VK_CHECK_CALL(vkCreatePipelineLayout(state.carpVk.device, &pipelineLayoutCreateInfo, nullptr, &state.pipelineLayout));
 
     if(vkCreateShadersEXT_T == nullptr)
     {
@@ -201,33 +209,232 @@ bool sCreateShaders(State& state,
     }
     return true;
 }
+#endif
+
+
+bool createGraphicsPipeline(State& state, const GPBuilder& builder)
+{
+
+    VkPipelineVertexInputStateCreateInfo vertexInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+
+    VkPipelineInputAssemblyStateCreateInfo assemblyInfo = { .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    assemblyInfo.topology = builder.topology;
+    assemblyInfo.primitiveRestartEnable = VK_FALSE;
+
+    VkPipelineViewportStateCreateInfo viewportInfo = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    viewportInfo.scissorCount = 1;
+    viewportInfo.viewportCount = 1;
+
+    VkPipelineRasterizationStateCreateInfo rasterInfo = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rasterInfo.lineWidth = 1.0f;
+    if(builder.topology == VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST)
+    {
+        rasterInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // VK_FRONT_FACE_CLOCKWISE;
+        rasterInfo.cullMode = VK_CULL_MODE_BACK_BIT;
+    }
+    else
+    {
+        rasterInfo.cullMode = VK_CULL_MODE_NONE;
+        // notice VkPhysicalDeviceFeatures .fillModeNonSolid = VK_TRUE required
+        //rasterInfo.polygonMode = VK_POLYGON_MODE_LINE;
+    }
+    VkPipelineMultisampleStateCreateInfo multiSampleInfo = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    multiSampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo depthInfo = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    depthInfo.depthTestEnable = builder.depthTest ? VK_TRUE : VK_FALSE;
+    depthInfo.depthWriteEnable = builder.writeDepth ? VK_TRUE : VK_FALSE;
+    depthInfo.depthCompareOp = builder.depthCompareOp;
+
+    VkPipelineColorBlendStateCreateInfo blendInfo = {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        .attachmentCount = builder.blendChannelCount,
+        .pAttachments = builder.blendChannels,
+    };
+
+    VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dynamicInfo = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dynamicInfo.pDynamicStates = dynamicStates;
+    dynamicInfo.dynamicStateCount = ARRAYSIZES(dynamicStates);
+
+
+    VkGraphicsPipelineCreateInfo createInfo = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    createInfo.stageCount = builder.stageInfoCount;
+    createInfo.pStages = builder.stageInfos;
+    createInfo.pVertexInputState = &vertexInfo;
+    createInfo.pInputAssemblyState = &assemblyInfo;
+    createInfo.pViewportState = &viewportInfo;
+    createInfo.pRasterizationState = &rasterInfo;
+    createInfo.pMultisampleState = &multiSampleInfo;
+    createInfo.pDepthStencilState = &depthInfo;
+    createInfo.pColorBlendState = &blendInfo;
+    createInfo.pDynamicState = &dynamicInfo;
+    createInfo.renderPass = VK_NULL_HANDLE;
+    createInfo.layout = state.pipelineLayout;
+    createInfo.basePipelineHandle = VK_NULL_HANDLE;
+
+
+    //Needed for dynamic rendering
+
+    const VkPipelineRenderingCreateInfo pipelineRenderingCreateInfo {
+        .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
+        .colorAttachmentCount = builder.colorFormatCount,
+        .pColorAttachmentFormats = builder.colorFormats,
+        .depthAttachmentFormat = builder.depthFormat,
+    };
+
+        //if(outPipeline.renderPass == VK_NULL_HANDLE)
+    createInfo.pNext = &pipelineRenderingCreateInfo;
+
+
+    VkPipeline pipeline = 0;
+    VK_CHECK_CALL(vkCreateGraphicsPipelines(state.carpVk.device, VK_NULL_HANDLE, 1, &createInfo, nullptr, &pipeline));
+    ASSERT(pipeline);
+
+    /*
+    if (!VulkanShader::createDescriptor(outPipeline))
+    {
+        printf("Failed to create graphics pipeline descriptor\n");
+        return false;
+    }
+     */
+    //setObjectName((uint64_t)pipeline, VK_DEBUG_REPORT_OBJECT_TYPE_PIPELINE_EXT, pipelineName);
+
+    state.pipeline = pipeline;
+    return pipeline != VK_NULL_HANDLE;
+}
+
+
+
+
+
+
+
 bool sPresent(State& state)
 {
     CarpVk& carpVk = state.carpVk;
-    int64_t frameIndex = state.carpVk.frameIndex;
+    int64_t frameIndex = state.carpVk.frameIndex % CarpVk::FramesInFlight;
     VkCommandBuffer commandBuffer = carpVk.commandBuffers[frameIndex];
 
+    VkImage swapchainImage = carpVk.swapchainImages[frameIndex % carpVk.swapchainCount];
 
+    /*
+    VkImageMemoryBarrier copyBeginBarriers[] =
+        {
+            imageBarrier(state.image,
+                VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL),
+
+            imageBarrier(swapchainImage,
+                0, VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_IMAGE_ASPECT_COLOR_BIT)
+        };
+
+//    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+    vkCmdPipelineBarrier(commandBuffer,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, ARRAYSIZES(copyBeginBarriers), copyBeginBarriers);
+*/
+
+    {
+        VkImageMemoryBarrier2 imageBarrier = {};
+        imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
+        imageBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        imageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        imageBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT; //  VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        imageBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT; //  VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT;
+        imageBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        imageBarrier.image = state.image.image;
+        imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        imageBarrier.subresourceRange.levelCount = 1;
+        imageBarrier.subresourceRange.layerCount = 1;
+
+        VkDependencyInfoKHR dep2 = {};
+        dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+        dep2.imageMemoryBarrierCount = 1;
+        dep2.pImageMemoryBarriers = &imageBarrier;
+
+        vkCmdPipelineBarrier2(commandBuffer, &dep2);
+
+    }
+
+
+
+
+    int width = SCREEN_WIDTH;
+    int height = SCREEN_HEIGHT;
+
+    VkImageBlit imageBlitRegion = {};
+
+    imageBlitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageBlitRegion.srcSubresource.layerCount = 1;
+    imageBlitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    imageBlitRegion.dstSubresource.layerCount = 1;
+    imageBlitRegion.srcOffsets[ 0 ] = VkOffset3D{ 0, 0, 0 };
+    imageBlitRegion.srcOffsets[ 1 ] = VkOffset3D{ width, height, 1 };
+    imageBlitRegion.dstOffsets[ 0 ] = VkOffset3D{ 0, 0, 0 };
+    imageBlitRegion.dstOffsets[ 1 ] = VkOffset3D{ width, height, 1 };
+
+
+    vkCmdBlitImage(commandBuffer,
+        state.image.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageBlitRegion, VkFilter::VK_FILTER_NEAREST);
 
 
     // Prepare image for presenting.
+/*
+    VkImageMemoryBarrier presentBarrier =
+        imageBarrier(swapchainImage,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            0, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_IMAGE_ASPECT_COLOR_BIT);
+
+    vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &presentBarrier);
+*/
+    {
+        VkImageMemoryBarrier2 presentBarrier = {};
+        presentBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
+        presentBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        presentBarrier.srcStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT_KHR;
+        presentBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT_KHR;
+
+        presentBarrier.image = swapchainImage;
+        presentBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        presentBarrier.subresourceRange.levelCount = 1;
+        presentBarrier.subresourceRange.layerCount = 1;
+
+        VkDependencyInfoKHR dep2 = {};
+        dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+        dep2.imageMemoryBarrierCount = 1;
+        dep2.pImageMemoryBarriers = &presentBarrier;
+        vkCmdPipelineBarrier2(commandBuffer, &dep2);
+    }
 
 
+
+// Prepare image for presenting.
+
+#if 0
     VkImageMemoryBarrier presentBarrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     presentBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     presentBarrier.dstAccessMask = 0;
-    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    presentBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     presentBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    //barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    //barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    presentBarrier.srcQueueFamilyIndex = carpVk.queueIndex;
-    presentBarrier.dstQueueFamilyIndex = carpVk.queueIndex;
+    presentBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    presentBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    //presentBarrier.srcQueueFamilyIndex = carpVk.queueIndex;
+    //presentBarrier.dstQueueFamilyIndex = carpVk.queueIndex;
     presentBarrier.image = carpVk.swapchainImages[ carpVk.imageIndex ];
     presentBarrier.subresourceRange.baseMipLevel = 0;
     presentBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     // Andoird error?
-    presentBarrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-    presentBarrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+    //presentBarrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
+    presentBarrier.subresourceRange.layerCount = 1;
 
     /*
     VkImageMemoryBarrier presentBarrier =
@@ -237,9 +444,11 @@ bool sPresent(State& state)
 */
     vkCmdPipelineBarrier(commandBuffer,
         //VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        //VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
         VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &presentBarrier);
-
+#endif
     VK_CHECK_CALL(vkEndCommandBuffer(commandBuffer));
 
 
@@ -249,7 +458,8 @@ bool sPresent(State& state)
     // Submit
     {
         //VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; //VK_PIPELINE_STAGE_TRANSFER_BIT;
-        VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //VK_PIPELINE_STAGE_TRANSFER_BIT;
+        //VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //VK_PIPELINE_STAGE_TRANSFER_BIT;
+        VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 
         vkResetFences(state.carpVk.device, 1, &state.carpVk.fences[frameIndex]);
 
@@ -283,12 +493,13 @@ bool sPresent(State& state)
         }
     }
 
-    //VK_CHECK(vkDeviceWaitIdle(vulk->device));
-
+    VK_CHECK_CALL(vkDeviceWaitIdle(carpVk.device));
+    return true;
 }
 
 bool sDraw(State& state)
 {
+    CarpVk& carpVk = state.carpVk;
     int width = SCREEN_WIDTH;
     int height = SCREEN_HEIGHT;
 
@@ -300,6 +511,71 @@ bool sDraw(State& state)
     vkResetCommandBuffer(commandBuffer, 0);
     VK_CHECK_CALL(vkBeginCommandBuffer(commandBuffer, &beginInfo));
 
+
+
+
+
+
+
+#if 0
+
+    VkImageMemoryBarrier imgBarrier = imageBarrier(state.image,
+        0, VK_IMAGE_LAYOUT_UNDEFINED,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+    vkCmdPipelineBarrier(commandBuffer,
+        //VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        //VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
+            | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &imgBarrier);
+#endif
+
+    {
+        VkImageMemoryBarrier2 imageBarrier = {};
+        imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
+        imageBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+        imageBarrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        imageBarrier.image = state.image.image;
+        imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        imageBarrier.subresourceRange.levelCount = 1;
+        imageBarrier.subresourceRange.layerCount = 1;
+
+        VkDependencyInfoKHR dep2 = {};
+        dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+        dep2.imageMemoryBarrierCount = 1;
+        dep2.pImageMemoryBarriers = &imageBarrier;
+
+        vkCmdPipelineBarrier2(commandBuffer, &dep2);
+
+    }
+
+    {
+        VkImage swapchainImage = carpVk.swapchainImages[frameIndex % carpVk.swapchainCount];
+
+        VkImageMemoryBarrier2 barrier = {};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
+        barrier.dstStageMask = VK_PIPELINE_STAGE_2_BLIT_BIT_KHR;
+        barrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT_KHR;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.image = swapchainImage; //swapchain.images[imageIndex];
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.layerCount = 1;
+
+        VkDependencyInfoKHR dep = {};
+        dep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers = &barrier;
+
+        vkCmdPipelineBarrier2(commandBuffer, &dep);
+    }
+
+
+
     //vkCmdResetQueryPool(vulk->commandBuffer, vulk->queryPools[vulk->frameIndex], 0, QUERY_COUNT);
     //vulk->currentStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 
@@ -307,7 +583,7 @@ bool sDraw(State& state)
     // New structures are used to define the attachments used in dynamic rendering
     VkRenderingAttachmentInfoKHR colorAttachment{};
     colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-    colorAttachment.imageView = state.carpVk.swapchainImagesViews[frameIndex];
+    colorAttachment.imageView = state.image.view;
     colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -336,9 +612,19 @@ bool sDraw(State& state)
     // Begin dynamic rendering
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
+    //vkCmdBindDescriptorSets(vulk->commandBuffer, bindPoint, pipelineWithDescriptor.pipelineLayout,
+    //    0, 1, &pipelineWithDescriptor.descriptor.descriptorSets[index], 0, NULL);
+
+
     VkViewport viewport = { 0.0f, float(height), float(width), -float(height), 0.0f, 1.0f };
     VkRect2D scissors = { { 0, 0 }, { u32(width), u32(height) } };
 
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissors);
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+    VkPipelineBindPoint bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    vkCmdBindPipeline(commandBuffer, bindPoint, state.pipeline);
+
+    /*
     // No more pipelines required, everything is bound at command buffer level
     // This also means that we need to explicitly set a lot of the state to be spec compliant
 
@@ -346,8 +632,8 @@ bool sDraw(State& state)
     vkCmdSetScissorWithCountEXT_T(commandBuffer, 1, &scissors);
     vkCmdSetCullModeEXT_T(commandBuffer, VK_CULL_MODE_BACK_BIT);
     vkCmdSetFrontFaceEXT_T(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdSetDepthTestEnableEXT_T(commandBuffer, VK_TRUE);
-    vkCmdSetDepthWriteEnableEXT_T(commandBuffer, VK_TRUE);
+    vkCmdSetDepthTestEnableEXT_T(commandBuffer,  VK_FALSE); //, VK_TRUE);
+    vkCmdSetDepthWriteEnableEXT_T(commandBuffer,  VK_FALSE) ; //VK_TRUE);
     vkCmdSetDepthCompareOpEXT_T(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
     vkCmdSetPrimitiveTopologyEXT_T(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     vkCmdSetRasterizerDiscardEnableEXT_T(commandBuffer, VK_FALSE);
@@ -388,20 +674,23 @@ bool sDraw(State& state)
     // Binding the shaders
     VkShaderStageFlagBits stages[2] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT };
     vkCmdBindShadersEXT_T(commandBuffer, 2, stages, state.shaders);
+*/
+
+
 
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
     // End dynamic rendering
     vkCmdEndRendering(commandBuffer);
+    return true;
 
 }
 
 bool sBeginFrame(State& state)
 {
     CarpVk& carpVk = state.carpVk;
-    int64_t& frameIndex = carpVk.frameIndex;
-    frameIndex = (frameIndex + 1) % CarpVk::FramesInFlight;
-
+    carpVk.frameIndex++;
+    int64_t frameIndex = carpVk.frameIndex % CarpVk::FramesInFlight;
     {
         //ScopedTimer aq("Acquire");
         VK_CHECK_CALL(vkWaitForFences(carpVk.device, 1, &carpVk.fences[frameIndex], VK_TRUE, UINT64_MAX));
@@ -437,15 +726,15 @@ bool sBeginFrame(State& state)
 
 int sRun(State &state)
 {
-    std::vector<char> fragShader;
-    std::vector<char> vertShader;
+    std::vector<char> fragShaderCode;
+    std::vector<char> vertShaderCode;
 
-    if(!sReadFile("assets/shader/vert.spv", vertShader))
+    if(!sReadFile("assets/shader/vert.spv", vertShaderCode))
     {
         printf("Failed to read vertex shader\n");
         return false;
     }
-    if(!sReadFile("assets/shader/frag.spv", fragShader))
+    if(!sReadFile("assets/shader/frag.spv", fragShaderCode))
     {
         printf("Failed to read fragment shader\n");
         return false;
@@ -461,7 +750,8 @@ int sRun(State &state)
         "An SDL3 window",
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
-        SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
+        SDL_WINDOW_VULKAN
+        //SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
     );
 
     // Check that the window was successfully created
@@ -525,7 +815,7 @@ int sRun(State &state)
     }
     carpVk.surface = surface;
 
-    if(!createPhysicalDevice(carpVk, false))
+    if(!createPhysicalDevice(carpVk, true)) //false))
     {
         printf("Failed to create physical device\n");
         return 3;
@@ -551,6 +841,7 @@ int sRun(State &state)
     carpVk.destroyBuffers = sDeinitShaders;
     carpVk.destroyBuffersData = &state;
 
+    /*
     {
 
         vkCreateShadersEXT_T = reinterpret_cast<PFN_vkCreateShadersEXT>(vkGetDeviceProcAddr(carpVk.device, "vkCreateShadersEXT"));
@@ -582,12 +873,80 @@ int sRun(State &state)
         vkCmdSetViewportWithCountEXT_T = reinterpret_cast<PFN_vkCmdSetViewportWithCountEXT>(vkGetDeviceProcAddr(carpVk.device, "vkCmdSetViewportWithCountEXT"));;
         vkCmdSetColorBlendEquationEXT_T = reinterpret_cast<PFN_vkCmdSetColorBlendEquationEXT>(vkGetDeviceProcAddr(carpVk.device, "vkCmdSetColorBlendEquationEXT"));;
     }
+
     if(!sCreateShaders(state,
-        vertShader.data(), vertShader.size(),
-        fragShader.data(), fragShader.size()))
+        vertShaderCode.data(), vertShaderCode.size(),
+        fragShaderCode.data(), fragShaderCode.size()))
     {
         printf("Failed to create shaders\n");
         return 7;
+    }
+*/
+    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    pipelineLayoutCreateInfo.setLayoutCount = 0;
+    pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+
+    VK_CHECK_CALL(vkCreatePipelineLayout(state.carpVk.device, &pipelineLayoutCreateInfo, nullptr, &state.pipelineLayout));
+
+    if(!createShader(state.carpVk, vertShaderCode.data(), vertShaderCode.size(), state.shaderModules[0]))
+    {
+        printf("Failed to create vert shader!\n");
+        return 9;
+    }
+
+    if(!createShader(state.carpVk, fragShaderCode.data(), fragShaderCode.size(), state.shaderModules[1]))
+    {
+        printf("Failed to create vert shader!\n");
+        return 9;
+    }
+
+    const VkFormat colorFormats[] = {
+        (VkFormat)state.carpVk.swapchainFormats.defaultColorFormat
+    };
+
+    VkPipelineColorBlendAttachmentState blendStates[] = {
+        { .blendEnable = VK_FALSE },
+    };
+
+    const VkPipelineShaderStageCreateInfo stageInfos[] = {
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT,
+            .module = state.shaderModules[0],
+            .pName = "main",
+        },
+        {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+            .module = state.shaderModules[1],
+            .pName = "main",
+        }
+    };
+
+
+    GPBuilder gpBuilder = {
+        .stageInfos = stageInfos,
+        .colorFormats = colorFormats,
+        .blendChannels = blendStates,
+        .stageInfoCount = ARRAYSIZES(stageInfos),
+        .colorFormatCount = ARRAYSIZES(colorFormats),
+        .blendChannelCount = ARRAYSIZES(blendStates),
+    };
+
+
+    if(!createGraphicsPipeline(state, gpBuilder))
+    {
+        printf("Failed to create graphics pipeline\n");
+        return 8;
+    }
+
+    if(!createImage(carpVk, SCREEN_WIDTH, SCREEN_HEIGHT, carpVk.swapchainFormats.defaultColorFormat,
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+            | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        state.image))
+    {
+        printf("Failed to create image\n");
+        return 8;
     }
 
 
