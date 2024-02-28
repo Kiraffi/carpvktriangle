@@ -120,6 +120,10 @@ void sDeinitShaders(CarpVk& carpVk)
 
     destroyImage(carpVk, state->image);
 
+    vkDestroyShaderModule(carpVk.device, state->shaderModules[0], nullptr);
+    vkDestroyShaderModule(carpVk.device, state->shaderModules[1], nullptr);
+
+    vkDestroyPipeline(carpVk.device, state->pipeline, nullptr);
     vkDestroyPipelineLayout(carpVk.device, state->pipelineLayout, nullptr);
     state->pipelineLayout = nullptr;
     for (int i = 0; i < SDL_arraysize(state->shaders); ++i)
@@ -459,7 +463,7 @@ bool sPresent(State& state)
     {
         //VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; //VK_PIPELINE_STAGE_TRANSFER_BIT;
         //VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //VK_PIPELINE_STAGE_TRANSFER_BIT;
-        VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+        VkPipelineStageFlags submitStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; // VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 
         vkResetFences(state.carpVk.device, 1, &state.carpVk.fences[frameIndex]);
 
@@ -815,7 +819,7 @@ int sRun(State &state)
     }
     carpVk.surface = surface;
 
-    if(!createPhysicalDevice(carpVk, true)) //false))
+    if(!createPhysicalDevice(carpVk, true))
     {
         printf("Failed to create physical device\n");
         return 3;
@@ -905,7 +909,15 @@ int sRun(State &state)
     };
 
     VkPipelineColorBlendAttachmentState blendStates[] = {
-        { .blendEnable = VK_FALSE },
+        {
+            .blendEnable = VK_FALSE,
+            //.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+            .colorWriteMask =
+                VK_COLOR_COMPONENT_R_BIT |
+                VK_COLOR_COMPONENT_G_BIT |
+                VK_COLOR_COMPONENT_B_BIT |
+                VK_COLOR_COMPONENT_A_BIT
+        },
     };
 
     const VkPipelineShaderStageCreateInfo stageInfos[] = {
