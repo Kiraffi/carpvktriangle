@@ -390,6 +390,9 @@ int sRun(State &state)
         return 8;
     }
 
+    char tmpBuf[256] = {};
+    int updateTick = 0;
+    uint64_t lastTicks = SDL_GetTicksNS();
 
     bool quit = false;
     //While application is running
@@ -419,7 +422,19 @@ int sRun(State &state)
         beginFrame();
         sDraw(state);
         presentImage(state.image);
+        static int MaxTicks = 100;
+        if(++updateTick >= MaxTicks)
+        {
+            uint64_t newTicks = SDL_GetTicksNS();
+            double diff = newTicks - lastTicks;
+            diff = diff > 0 ? diff / MaxTicks : 1;
+            lastTicks = newTicks;
 
+            SDL_snprintf(tmpBuf, 255, "FPS: %f - %fms", 1'000'000'000.0 / diff, diff / 1'000'000.0);
+
+            SDL_SetWindowTitle(state.window, tmpBuf);
+            updateTick = 0;
+        }
         SDL_Delay(1);
     }
 
