@@ -71,11 +71,11 @@ void sDeinitShaders(CarpVk& carpVk)
 
     vkDestroyPipeline(device, state->pipeline, nullptr);
     vkDestroyPipelineLayout(device, state->pipelineLayout, nullptr);
-    state->pipelineLayout = nullptr;
+    state->pipelineLayout = {};
     if(state->pool)
     {
         vkDestroyDescriptorPool(device, state->pool, nullptr);
-        state->pool = nullptr;
+        state->pool = {};
     }
 }
 
@@ -187,12 +187,12 @@ VkSurfaceKHR createSurface(VkInstance instance, void* ptr)
     if(SDL_Vulkan_CreateSurface(state->window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
     {
         printf("Failed to create surface\n");
-        return nullptr;
+        return {};
     }
-    if(surface == nullptr)
+    if(surface == 0)
     {
         printf("Failed to create surface\n");
-        return nullptr;
+        return {};
     }
     return surface;
 }
@@ -282,7 +282,7 @@ int sRun(State &state)
         printf("Failed to create surface\n");
         return 2;
     }
-    if(surface == nullptr)
+    if(!surface)
     {
         printf("Failed to create surface\n");
         return 2;
@@ -375,7 +375,7 @@ int sRun(State &state)
     };
     state.pipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
 
-    if(state.pipeline == nullptr)
+    if(!state.pipeline)
     {
         printf("Failed to create graphics pipeline\n");
         return 8;
