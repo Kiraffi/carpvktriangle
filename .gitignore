@@ -31,6 +31,7 @@
 *.out
 *.app
 
-cmake-bu*/**
-.vs/**
-out/build/**
+cmake-bu*
+.vs
+out
+build
