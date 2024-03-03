@@ -464,7 +464,7 @@ int sRun(State &state)
     if(!createImage(SCREEN_WIDTH, SCREEN_HEIGHT, swapchainFormats.defaultColorFormat,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
             | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        state.image))
+        "Render target", state.image))
     {
         printf("Failed to create image\n");
         return 8;
