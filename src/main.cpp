@@ -112,35 +112,7 @@ bool sDraw(State& state)
     int width = SCREEN_WIDTH;
     int height = SCREEN_HEIGHT;
 
-    VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VkCommandBuffer commandBuffer = getVkCommandBuffer();
-
-    vkResetCommandBuffer(commandBuffer, 0);
-    VK_CHECK_CALL(vkBeginCommandBuffer(commandBuffer, &beginInfo));
-
-
-
-
-
-
-
-#if 0
-
-    VkImageMemoryBarrier imgBarrier = imageBarrier(state.image,
-        0, VK_IMAGE_LAYOUT_UNDEFINED,
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-    vkCmdPipelineBarrier(commandBuffer,
-        //VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        //VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-            | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT
-            | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_DEPENDENCY_BY_REGION_BIT, 0, nullptr, 0, nullptr, 1, &imgBarrier);
-#endif
-
     {
         VkImageMemoryBarrier2 imageBarrier = {};
         imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
@@ -272,6 +244,23 @@ bool sDraw(State& state)
     vkCmdEndRendering(commandBuffer);
     return true;
 
+}
+
+VkSurfaceKHR createSurface(VkInstance instance, void* ptr)
+{
+    VkSurfaceKHR surface;
+    State *state = (State *)ptr;
+    if(SDL_Vulkan_CreateSurface(state->window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
+    {
+        printf("Failed to create surface\n");
+        return nullptr;
+    }
+    if(surface == nullptr)
+    {
+        printf("Failed to create surface\n");
+        return nullptr;
+    }
+    return surface;
 }
 
 
@@ -412,14 +401,11 @@ int sRun(State &state)
         return 9;
     }
     const CarpSwapChainFormats& swapchainFormats = getSwapChainFormats();
-    const VkFormat colorFormats[] = {
-        (VkFormat)swapchainFormats.defaultColorFormat
-    };
+    const VkFormat colorFormats[] = { swapchainFormats.defaultColorFormat };
 
     VkPipelineColorBlendAttachmentState blendStates[] = {
         {
             .blendEnable = VK_FALSE,
-            //.srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
             .colorWriteMask =
                 VK_COLOR_COMPONENT_R_BIT |
                 VK_COLOR_COMPONENT_G_BIT |
