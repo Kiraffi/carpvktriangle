@@ -114,31 +114,20 @@ bool sDraw(State& state)
 
     VkCommandBuffer commandBuffer = getVkCommandBuffer();
     {
-        VkImageMemoryBarrier2 imageBarrier = {};
-        imageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2_KHR;
-        imageBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        imageBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        imageBarrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-        imageBarrier.image = state.image.image;
-        imageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        imageBarrier.subresourceRange.levelCount = 1;
-        imageBarrier.subresourceRange.layerCount = 1;
-
+        VkImageMemoryBarrier2 imgBarrier[] = {
+            imageBarrier(state.image, 
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        };
         VkDependencyInfoKHR dep2 = {};
         dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
-        dep2.imageMemoryBarrierCount = 1;
-        dep2.pImageMemoryBarriers = &imageBarrier;
+        dep2.imageMemoryBarrierCount = ARRAYSIZES(imgBarrier);
+        dep2.pImageMemoryBarriers = imgBarrier;
 
         vkCmdPipelineBarrier2(commandBuffer, &dep2);
 
     }
-
-
-
-
-    //vkCmdResetQueryPool(vulk->commandBuffer, vulk->queryPools[vulk->frameIndex], 0, QUERY_COUNT);
-    //vulk->currentStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-
 
     // New structures are used to define the attachments used in dynamic rendering
     VkRenderingAttachmentInfoKHR colorAttachment{};
@@ -149,17 +138,18 @@ bool sDraw(State& state)
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.clearValue.color = { 0.0f,0.0f,0.0f,0.0f };
 
+    /*
     // A single depth stencil attachment info can be used, but they can also be specified separately.
     // When both are specified separately, the only requirement is that the image view is identical.
     VkRenderingAttachmentInfoKHR depthStencilAttachment{};
     depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-    /*
     depthStencilAttachment.imageView = depthStencil.view;
     depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
     depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthStencilAttachment.clearValue.depthStencil = { 1.0f,  0 };
-*/
+    */
+
     VkRenderingInfoKHR renderingInfo{};
     renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
     renderingInfo.renderArea = { 0, 0, u32(width), u32(height) };
@@ -181,69 +171,13 @@ bool sDraw(State& state)
 
     vkCmdSetScissor(commandBuffer, 0, 1, &scissors);
     vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    VkPipelineBindPoint bindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    vkCmdBindPipeline(commandBuffer, bindPoint, state.pipeline);
-
-    /*
-    // No more pipelines required, everything is bound at command buffer level
-    // This also means that we need to explicitly set a lot of the state to be spec compliant
-
-    vkCmdSetViewportWithCountEXT_T(commandBuffer, 1, &viewport);
-    vkCmdSetScissorWithCountEXT_T(commandBuffer, 1, &scissors);
-    vkCmdSetCullModeEXT_T(commandBuffer, VK_CULL_MODE_BACK_BIT);
-    vkCmdSetFrontFaceEXT_T(commandBuffer, VK_FRONT_FACE_COUNTER_CLOCKWISE);
-    vkCmdSetDepthTestEnableEXT_T(commandBuffer,  VK_FALSE); //, VK_TRUE);
-    vkCmdSetDepthWriteEnableEXT_T(commandBuffer,  VK_FALSE) ; //VK_TRUE);
-    vkCmdSetDepthCompareOpEXT_T(commandBuffer, VK_COMPARE_OP_LESS_OR_EQUAL);
-    vkCmdSetPrimitiveTopologyEXT_T(commandBuffer, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    vkCmdSetRasterizerDiscardEnableEXT_T(commandBuffer, VK_FALSE);
-    vkCmdSetPolygonModeEXT_T(commandBuffer, VK_POLYGON_MODE_FILL);
-    vkCmdSetRasterizationSamplesEXT_T(commandBuffer, VK_SAMPLE_COUNT_1_BIT);
-    vkCmdSetAlphaToCoverageEnableEXT_T(commandBuffer, VK_FALSE);
-    vkCmdSetDepthBiasEnableEXT_T(commandBuffer, VK_FALSE);
-    vkCmdSetStencilTestEnableEXT_T(commandBuffer, VK_FALSE);
-    vkCmdSetPrimitiveRestartEnableEXT_T(commandBuffer, VK_FALSE);
-
-    VkColorBlendEquationEXT colorBlend {
-        .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstColorBlendFactor = VK_BLEND_FACTOR_ONE,
-        .colorBlendOp = VK_BLEND_OP_ADD,
-        .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
-        .alphaBlendOp = VK_BLEND_OP_ADD,
-    };
-
-    vkCmdSetColorBlendEquationEXT_T(commandBuffer, 0, 1, &colorBlend);
-
-    const uint32_t sampleMask = 0xFF;
-    vkCmdSetSampleMaskEXT_T(commandBuffer, VK_SAMPLE_COUNT_1_BIT, &sampleMask);
-
-    const VkBool32 colorBlendEnables = false;
-    const VkColorComponentFlags colorBlendComponentFlags = 0xf;
-    const VkColorBlendEquationEXT colorBlendEquation{};
-    vkCmdSetColorBlendEnableEXT_T(commandBuffer, 0, 1, &colorBlendEnables);
-    vkCmdSetColorWriteMaskEXT_T(commandBuffer, 0, 1, &colorBlendComponentFlags);
-
-
-    vkCmdSetVertexInputEXT_T(commandBuffer, 0, nullptr, 0, nullptr);
-
-    // must be > 0
-    //vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-    //    state.pipeline, 0, 0, nullptr, 0, nullptr);
-
-    // Binding the shaders
-    VkShaderStageFlagBits stages[2] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT };
-    vkCmdBindShadersEXT_T(commandBuffer, 2, stages, state.shaders);
-*/
-
-
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
 
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 
     // End dynamic rendering
     vkCmdEndRendering(commandBuffer);
     return true;
-
 }
 
 VkSurfaceKHR createSurface(VkInstance instance, void* ptr)
@@ -439,7 +373,7 @@ int sRun(State &state)
         .colorFormatCount = ARRAYSIZES(colorFormats),
         .blendChannelCount = ARRAYSIZES(blendStates),
     };
-    state.pipeline = createGraphicsPipeline(gpBuilder);
+    state.pipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
 
     if(state.pipeline == nullptr)
     {
@@ -481,10 +415,11 @@ int sRun(State &state)
                 default:
                     break;
             }
-            beginFrame();
-            sDraw(state);
-            presentImage(state.image);
         }
+        beginFrame();
+        sDraw(state);
+        presentImage(state.image);
+
         SDL_Delay(1);
     }
 
@@ -507,8 +442,6 @@ int main()
 
     // Clean up
     SDL_Quit();
-
-
 
     return returnValue;
 }
