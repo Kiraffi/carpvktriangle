@@ -26,10 +26,7 @@ static const int SCREEN_HEIGHT = 768;
 struct State
 {
     SDL_Window *window = nullptr;
-    CarpVk carpVk;
-    VulkanInstanceBuilder builder;
 
-    VkDescriptorPool pool = {};
     VkDescriptorSetLayout descriptorSetLayout = {};
 
     VkPipelineLayout pipelineLayout = {};
@@ -59,9 +56,9 @@ static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
     return true;
 }
 
-void sDeinitShaders(CarpVk& carpVk)
+void sDeinitShaders(void* data)
 {
-    State *state = (State *) carpVk.destroyBuffersData;
+    State *state = (State *) data;
 
     VkDevice device = getVkDevice();
 
@@ -72,34 +69,7 @@ void sDeinitShaders(CarpVk& carpVk)
     vkDestroyPipeline(device, state->pipeline, nullptr);
     vkDestroyPipelineLayout(device, state->pipelineLayout, nullptr);
     state->pipelineLayout = {};
-    if(state->pool)
-    {
-        vkDestroyDescriptorPool(device, state->pool, nullptr);
-        state->pool = {};
-    }
 }
-
-
-
-bool sCreateDescriptorPool(State& state)
-{
-    VkDevice device = getVkDevice();
-
-    VkDescriptorPoolCreateInfo poolInfo = {};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = 0;
-    poolInfo.pPoolSizes = nullptr;
-    poolInfo.maxSets = 1024;
-
-    VK_CHECK_CALL(vkCreateDescriptorPool(device, &poolInfo, nullptr, &state.pool));
-    //if()
-
-    return true;
-}
-
-
-
-
 
 
 
@@ -108,7 +78,6 @@ bool sCreateDescriptorPool(State& state)
 
 bool sDraw(State& state)
 {
-    CarpVk& carpVk = state.carpVk;
     int width = SCREEN_WIDTH;
     int height = SCREEN_HEIGHT;
 
@@ -180,23 +149,22 @@ bool sDraw(State& state)
     return true;
 }
 
-VkSurfaceKHR createSurface(VkInstance instance, void* ptr)
+static VkSurfaceKHR sCreateSurface(VkInstance instance, void* ptr)
 {
+    State* state = (State*)ptr;
     VkSurfaceKHR surface;
-    State *state = (State *)ptr;
     if(SDL_Vulkan_CreateSurface(state->window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
     {
         printf("Failed to create surface\n");
         return {};
     }
-    if(surface == 0)
+    if(!surface)
     {
         printf("Failed to create surface\n");
         return {};
     }
     return surface;
 }
-
 
 int sRun(State &state)
 {
@@ -213,8 +181,6 @@ int sRun(State &state)
         printf("Failed to read fragment shader\n");
         return false;
     }
-
-    CarpVk& carpVk = state.carpVk;
 
     // Create window
     SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL3
@@ -234,88 +200,36 @@ int sRun(State &state)
         printf("Could not create window: %s\n", SDL_GetError());
         return false;
     }
-
-
-    const char* extensions[256] = {};
-    uint32_t extensionCount = 0;
-    const char* const* sdlExtensions = SDL_Vulkan_GetInstanceExtensions(&extensionCount);
-
-    for(int i = 0; i < extensionCount; ++i)
+    static const char *extensions[] =
     {
-        extensions[i] = sdlExtensions[i];
-    }
-#if NDEBUG
-#else
-    extensions[extensionCount++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+        VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
+    };
+
+    VulkanInstanceParams vkInstanceParams = {
+        .getExtraExtensionsFn = SDL_Vulkan_GetInstanceExtensions,
+        .createSurfaceFn = sCreateSurface,
+        .destroyBuffersFn = sDeinitShaders,
+        .pData = &state,
+#if !NDEBUG
+        .extensions = extensions,
+        .extensionCount = ARRAYSIZES(extensions),
 #endif
-
-    //VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-    //VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
-    //VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-    //"VK_LAYER_KHRONOS_shader_object",
-    // VK_KHR_SURFACE_EXTENSION_NAME,
-    //"VK_KHR_xlib_surface",
-    //"VK_KHR_xcb_surface",
-
-
-    //printExtensions();
-    //printLayers();
-
-
-    VulkanInstanceBuilder builder = instaceBuilder();
-    instanceBuilderSetExtensions(builder, extensions, extensionCount);
-#if NDEBUG
-#else
-    instanceBuilderUseDefaultValidationLayers(builder);
+        .width = SCREEN_WIDTH,
+        .height = SCREEN_HEIGHT,
+        .vsyncMode = VSyncType::IMMEDIATE_NO_VSYNC,
+#if !NDEBUG
+        .useValidation = true,
 #endif
-    if(!instanceBuilderFinish(builder))
+        .useIntegratedGpu = true,
+    };
+
+    if(!initVulkan(vkInstanceParams))
     {
-        printf("Failed to initialize vulkan.\n");
+        printf("Failed to initialize vulkan\n");
         return 1;
     }
-    printf("Success on creating instance\n");
 
-
-    VkSurfaceKHR surface;
-    if(SDL_Vulkan_CreateSurface(state.window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
-    {
-        printf("Failed to create surface\n");
-        return 2;
-    }
-    if(!surface)
-    {
-        printf("Failed to create surface\n");
-        return 2;
-    }
-    setVkSurface(surface);
-
-    if(!createPhysicalDevice(true))
-    {
-        printf("Failed to create physical device\n");
-        return 3;
-    }
-
-    if(!createDeviceWithQueues(builder))
-    {
-        printf("Failed to create logical device with queues\n");
-        return 4;
-    }
-
-    if(!createSwapchain(VSyncType::IMMEDIATE_NO_VSYNC, SCREEN_WIDTH, SCREEN_HEIGHT))
-    {
-        printf("Failed to create swapchain\n");
-        return 5;
-    }
-    if(!finalizeInit(carpVk))
-    {
-        printf("Failed to finialize initializing vulkan\n");
-        return 6;
-    }
     VkDevice device = getVkDevice();
-
-
-    carpVk.destroyBuffers = sDeinitShaders;
-    carpVk.destroyBuffersData = &state;
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
     pipelineLayoutCreateInfo.setLayoutCount = 0;
@@ -450,7 +364,7 @@ int main()
     State state = {};
     int returnValue = sRun(state);
 
-    deinitCarpVk(state.carpVk);
+    deinitVulkan();
 
     // Close and destroy the window
     SDL_DestroyWindow(state.window);
