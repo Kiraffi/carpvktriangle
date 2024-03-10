@@ -136,7 +136,7 @@ bool sDraw(State& state)
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
     vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipelineLayout,
-        0, 1, &state.descriptorSet,
+        0, 1, state.descriptorSets,
         0, NULL);
 
 
@@ -169,6 +169,26 @@ static VkSurfaceKHR sCreateSurface(VkInstance instance, void* ptr)
         return {};
     }
     return surface;
+}
+
+float clamp(float v, float minValue, float maxValue)
+{
+    v = v < minValue ? minValue : v;
+    v = v > maxValue ? maxValue : v;
+    return v;
+}
+
+uint32_t sGetColor(float r, float g, float b, float a)
+{
+    r = clamp(r, 0.0f, 1.0f);
+    g = clamp(g, 0.0f, 1.0f);
+    b = clamp(b, 0.0f, 1.0f);
+    a = clamp(a, 0.0f, 1.0f);
+    uint32_t color = uint32_t(r * 255.0f);
+    color |= (uint32_t(g * 255.0f)) << 8u;
+    color |= (uint32_t(b * 255.0f)) << 16u;
+    color |= (uint32_t(a * 255.0f)) << 24u;
+    return color;
 }
 
 int sRun(State &state)
@@ -225,7 +245,7 @@ int sRun(State &state)
 #if !NDEBUG
         .useValidation = true,
 #endif
-        .useIntegratedGpu = true,
+        .useIntegratedGpu = false, //true,
     };
 
     if(!initVulkan(vkInstanceParams))
@@ -271,14 +291,15 @@ int sRun(State &state)
 
     VK_CHECK_CALL(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &state.pipelineLayout));
 
-    static constexpr DescriptorInfo descritorSetInfos[] = {
+    static const DescriptorInfo descritorSetInfos[] = {
         DescriptorInfo(state.modelVerticesBuffer, 0, state.modelVerticesBuffer.size),
     };
 
-    if(!updateBindDescriptorSet(descriptorLayouts,
-        state.descriptorSets, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
+    if(!updateBindDescriptorSet(state.descriptorSets,
+        descriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
     {
-
+        printf("Failed to update descriptorset\n");
+        return 1;
     }
 
 
@@ -349,6 +370,30 @@ int sRun(State &state)
         printf("Failed to create image\n");
         return 8;
     }
+
+    {
+        struct VData
+        {
+            float posX;
+            float posY;
+            float posZ;
+            uint32_t color;
+        };
+
+        VData vData[] =
+        {
+            {0.0, 0.5f, 0.5f, sGetColor(0.0f, 1.0f, 0.0f, 1.0f)},
+            {-0.5, -0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
+            {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
+
+        };
+        beginPreFrame();
+        BufferCopyRegion region = uploadToScratchbuffer(vData, 0, sizeof(vData));
+        uploadScratchBufferToGpuBuffer(state.modelVerticesBuffer, region,
+            VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT);
+        endPreFrame();
+    }
+
 
     char tmpBuf[256] = {};
     int updateTick = 0;
