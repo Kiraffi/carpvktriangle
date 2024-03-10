@@ -34,8 +34,11 @@ struct State
 
     VkShaderModule shaderModules[2] = {};
 
+    VkDescriptorSet descriptorSets[16] = {};
+    Buffer modelVerticesBuffer = {};
     Image image = {};
 };
+
 
 static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
 {
@@ -65,7 +68,8 @@ void sDeinitShaders(void* data)
     destroyImage(state->image);
 
     destroyShaderModule(state->shaderModules, 2);
-
+    destroyBuffer(state->modelVerticesBuffer);
+    vkDestroyDescriptorSetLayout(device, state->descriptorSetLayout, nullptr);
     vkDestroyPipeline(device, state->pipeline, nullptr);
     vkDestroyPipelineLayout(device, state->pipelineLayout, nullptr);
     state->pipelineLayout = {};
@@ -131,8 +135,9 @@ bool sDraw(State& state)
     // Begin dynamic rendering
     vkCmdBeginRendering(commandBuffer, &renderingInfo);
 
-    //vkCmdBindDescriptorSets(vulk->commandBuffer, bindPoint, pipelineWithDescriptor.pipelineLayout,
-    //    0, 1, &pipelineWithDescriptor.descriptor.descriptorSets[index], 0, NULL);
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipelineLayout,
+        0, 1, &state.descriptorSet,
+        0, NULL);
 
 
     VkViewport viewport = { 0.0f, float(height), float(width), -float(height), 0.0f, 1.0f };
@@ -230,12 +235,52 @@ int sRun(State &state)
     }
 
     VkDevice device = getVkDevice();
+    if(!createBuffer(1024u * 1024u * 16u,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Model Vercies data buffer",
+        state.modelVerticesBuffer))
+    {
+        printf("Failed to create model vertice data buffer\n");
+        return 2;
+    }
+
+    static constexpr DescriptorSetLayout descriptorLayouts[] =
+    {
+        {
+            .bindingIndex = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+        },
+    };
+
+    state.descriptorSetLayout = createSetLayout(descriptorLayouts, ARRAYSIZES(descriptorLayouts));
+    if(!createDescriptorSet(state.descriptorSetLayout,
+        descriptorLayouts, ARRAYSIZES(descriptorLayouts),
+        state.descriptorSets))
+    {
+        printf("Failed to create descriptorset\n");
+        return 2;
+    }
+
+
+
 
     VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pipelineLayoutCreateInfo.setLayoutCount = 0;
-    pipelineLayoutCreateInfo.pSetLayouts = nullptr;
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &state.descriptorSetLayout;
 
     VK_CHECK_CALL(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &state.pipelineLayout));
+
+    static constexpr DescriptorInfo descritorSetInfos[] = {
+        DescriptorInfo(state.modelVerticesBuffer, 0, state.modelVerticesBuffer.size),
+    };
+
+    if(!updateBindDescriptorSet(descriptorLayouts,
+        state.descriptorSets, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
+    {
+
+    }
+
 
     if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.shaderModules[0]))
     {
@@ -276,6 +321,7 @@ int sRun(State &state)
             .pName = "main",
         }
     };
+
 
 
     GPBuilder gpBuilder = {
