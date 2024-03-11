@@ -12,12 +12,6 @@
 #include <vector>
 #include <fstream>
 
-#define VK_CHECK_CALL(call) do { \
-    VkResult callResult = call; \
-    if(callResult != VkResult::VK_SUCCESS) \
-        printf("Result: %i\n", int(callResult)); \
-    ASSERT(callResult == VkResult::VK_SUCCESS); \
-    } while(0)
 
 
 static const int SCREEN_WIDTH = 1024;
@@ -32,7 +26,6 @@ struct State
     VkPipelineLayout graphicsPipelineLayout = {};
     VkPipeline graphicsPipeline = {};
 
-    VkPipelineLayout computePipelineLayout = {};
     VkPipeline computePipeline = {};
 
     VkShaderModule shaderModules[3] = {};
@@ -80,10 +73,6 @@ void sDeinitShaders(void* userData)
     vkDestroyPipeline(device, state->computePipeline, nullptr);
     vkDestroyPipelineLayout(device, state->graphicsPipelineLayout, nullptr);
     state->graphicsPipelineLayout = {};
-
-    vkDestroyPipelineLayout(device, state->computePipelineLayout, nullptr);
-    state->computePipelineLayout = {};
-
 }
 void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
 {
@@ -160,24 +149,21 @@ bool sDraw(State& state)
         UpdateStruct data = {
             .totalTimeMs = uint32_t((SDL_GetTicksNS() - state.ticksAtStart) / 1000),
         };
-        BufferCopyRegion region = uploadToScratchbuffer(
-            &data, state.uniformBuffer.offset, sizeof(UpdateStruct));
-        uploadScratchBufferToGpuUniformBuffer(state.uniformBuffer, region,
-            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT);
 
-        flushBarriers();
+        uploadToUniformBuffer(state.uniformBuffer, &data, sizeof(UpdateStruct));
 
         bufferBarrier(state.modelVerticesBuffer,
             VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        flushBarriers();
+
         bufferBarrier(state.uniformBuffer,
             VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
         flushBarriers();
 
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, 
-            state.computePipelineLayout, 0, 1, &state.descriptorSet, 0, NULL);
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, state.computePipeline);
+        beginComputePipeline(state.graphicsPipelineLayout, state.computePipeline, state.descriptorSet);
         vkCmdDispatch(commandBuffer, 1, 1, 1);
+        endComputePipeline();
     }
 
 
@@ -195,55 +181,21 @@ bool sDraw(State& state)
         flushBarriers();
     }
 
-    // New structures are used to define the attachments used in dynamic rendering
-    VkRenderingAttachmentInfo colorAttachment{};
-    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorAttachment.imageView = state.image.view;
-    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { 0.0f,0.0f,0.0f,0.0f };
+    RenderingAttachmentInfo colorAttachments[] =
+    {
+        {
+            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 0.0f } },
+            .image = &state.image,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+        }
+    };
 
-    /*
-    // A single depth stencil attachment info can be used, but they can also be specified separately.
-    // When both are specified separately, the only requirement is that the image view is identical.
-    VkRenderingAttachmentInfo depthStencilAttachment{};
-    depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthStencilAttachment.imageView = depthStencil.view;
-    depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthStencilAttachment.clearValue.depthStencil = { 1.0f,  0 };
-    */
-
-    VkRenderingInfo renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderingInfo.renderArea = { 0, 0, u32(width), u32(height) };
-    renderingInfo.layerCount = 1;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &colorAttachment;
-    //renderingInfo.pDepthAttachment = &depthStencilAttachment;
-    //renderingInfo.pStencilAttachment = &depthStencilAttachment;
-
-    // Begin dynamic rendering
-    vkCmdBeginRendering(commandBuffer, &renderingInfo);
-
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.graphicsPipelineLayout,
-        0, 1, &state.descriptorSet,
-        0, NULL);
-
-
-    VkViewport viewport = { 0.0f, float(height), float(width), -float(height), 0.0f, 1.0f };
-    VkRect2D scissors = { { 0, 0 }, { u32(width), u32(height) } };
-
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissors);
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.graphicsPipeline);
-
+    beginRenderPipeline(colorAttachments, ARRAYSIZES(colorAttachments), nullptr,
+        state.graphicsPipelineLayout, state.graphicsPipeline, state.descriptorSet);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+    endRenderPipeline();
 
-    // End dynamic rendering
-    vkCmdEndRendering(commandBuffer);
     return true;
 }
 
@@ -402,7 +354,6 @@ int sRun(State &state)
 
 
     state.graphicsPipelineLayout = createPipelineLayout(state.descriptorSetLayout);
-    state.computePipelineLayout = createPipelineLayout(state.descriptorSetLayout);
 
     static const DescriptorInfo descritorSetInfos[] = {
         DescriptorInfo(state.modelVerticesBuffer, 0, state.modelVerticesBuffer.size),
@@ -416,21 +367,11 @@ int sRun(State &state)
         return 1;
     }
 
-    if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.shaderModules[0]))
+    if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.shaderModules[0])
+        || !createShader(fragShaderCode.data(), fragShaderCode.size(), state.shaderModules[1])
+        || !createShader(compShaderCode.data(), compShaderCode.size(), state.shaderModules[2]))
     {
-        printf("Failed to create vert shader!\n");
-        return 9;
-    }
-
-    if(!createShader(fragShaderCode.data(), fragShaderCode.size(), state.shaderModules[1]))
-    {
-        printf("Failed to create frag shader!\n");
-        return 9;
-    }
-
-    if(!createShader(compShaderCode.data(), compShaderCode.size(), state.shaderModules[2]))
-    {
-        printf("Failed to create comp shader!\n");
+        printf("Failed to create shaders!\n");
         return 9;
     }
 
@@ -460,7 +401,7 @@ int sRun(State &state)
 
     CPBuilder cpBuilder = {
         .stageInfo = createDefaultComputeInfo(state.shaderModules[2]),
-        .pipelineLayout = state.computePipelineLayout,
+        .pipelineLayout = state.graphicsPipelineLayout,
     };
 
     state.computePipeline = createComputePipeline(cpBuilder, "Compute pipeline");
@@ -497,9 +438,7 @@ int sRun(State &state)
 
         };
         beginPreFrame();
-        BufferCopyRegion region = uploadToScratchbuffer(vData, 0, sizeof(vData));
-        uploadScratchBufferToGpuBuffer(state.modelVerticesBuffer, region,
-            VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT);
+        uploadToGpuBuffer(state.modelVerticesBuffer, vData, 0, sizeof(vData));
         flushBarriers();
         endPreFrame();
     }
@@ -534,8 +473,6 @@ int sRun(State &state)
                     break;
             }
         }
-
-
 
         beginFrame();
         sDraw(state);
