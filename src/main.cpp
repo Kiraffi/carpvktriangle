@@ -165,25 +165,17 @@ bool sDraw(State& state)
         uploadScratchBufferToGpuUniformBuffer(state.uniformBuffer, region,
             VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT);
 
-        VkBufferMemoryBarrier2 barriers[] = {
-            bufferBarrier(state.modelVerticesBuffer,
-                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
-            bufferBarrier(state.uniformBuffer,
-                VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
-        };
+        flushBarriers();
 
+        bufferBarrier(state.modelVerticesBuffer,
+            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+        bufferBarrier(state.uniformBuffer,
+            VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 
-        VkDependencyInfo dependencyInfo = {};
-        dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dependencyInfo.bufferMemoryBarrierCount = ARRAYSIZES(barriers);
-        dependencyInfo.pBufferMemoryBarriers = barriers;
+        flushBarriers();
 
-        vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
-
-
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, state.computePipelineLayout,
-    0, 1, &state.descriptorSet,
-    0, NULL);
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, 
+            state.computePipelineLayout, 0, 1, &state.descriptorSet, 0, NULL);
         vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, state.computePipeline);
         vkCmdDispatch(commandBuffer, 1, 1, 1);
     }
@@ -191,26 +183,16 @@ bool sDraw(State& state)
 
 
     {
-        VkImageMemoryBarrier2 imgBarrier[] = {
-            imageBarrier(state.image, 
-                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-        };
-        VkBufferMemoryBarrier2 bufBar = bufferBarrier(state.modelVerticesBuffer,
+        imageBarrier(state.image,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        
+        bufferBarrier(state.modelVerticesBuffer,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
             VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
 
-        VkDependencyInfo dep2 = {};
-        dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
-        dep2.imageMemoryBarrierCount = ARRAYSIZES(imgBarrier);
-        dep2.pImageMemoryBarriers = imgBarrier;
-        dep2.bufferMemoryBarrierCount = 1;
-        dep2.pBufferMemoryBarriers = &bufBar;
-
-        vkCmdPipelineBarrier2(commandBuffer, &dep2);
-
-
+        flushBarriers();
     }
 
     // New structures are used to define the attachments used in dynamic rendering
@@ -341,7 +323,8 @@ int sRun(State &state)
     );
 
     // Check that the window was successfully created
-    if (state.window == NULL) {
+    if (state.window == NULL)
+    {
         // In the case that the window could not be made...
         printf("Could not create window: %s\n", SDL_GetError());
         return false;
@@ -517,6 +500,7 @@ int sRun(State &state)
         BufferCopyRegion region = uploadToScratchbuffer(vData, 0, sizeof(vData));
         uploadScratchBufferToGpuBuffer(state.modelVerticesBuffer, region,
             VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT, VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT);
+        flushBarriers();
         endPreFrame();
     }
 
