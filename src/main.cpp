@@ -94,8 +94,8 @@ void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
 
 bool sCreateImage(State& state)
 {
-    int width = SCREEN_WIDTH;
-    int height = SCREEN_HEIGHT;
+    int width = 0;
+    int height = 0;
     sGetWindowSize(&width, &height, &state);
     if(width == state.image.width && height == state.image.height)
     {
@@ -144,9 +144,8 @@ static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
 
 bool sDraw(State& state)
 {
-    int width = SCREEN_WIDTH;
-    int height = SCREEN_HEIGHT;
-    sGetWindowSize(&width, &height, &state);
+    int width = state.image.width;
+    int height = state.image.height;
 
     VkCommandBuffer commandBuffer = getVkCommandBuffer();
 
