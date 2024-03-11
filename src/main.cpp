@@ -7,7 +7,6 @@
 
 #include <SDL3/SDL.h>
 #include "SDL_vulkan.h"
-#include "../external/carpvk/src/carpvk.h"
 
 #include <vector>
 #include <fstream>
