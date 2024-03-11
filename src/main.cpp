@@ -149,8 +149,6 @@ bool sDraw(State& state)
 
     VkCommandBuffer commandBuffer = getVkCommandBuffer();
 
-    state.modelVerticesBuffer.accessMask = VK_ACCESS_2_NONE;
-    state.modelVerticesBuffer.stageMask = VK_PIPELINE_STAGE_2_NONE;
     // Compute
     {
         struct UpdateStruct
@@ -166,8 +164,6 @@ bool sDraw(State& state)
             &data, state.uniformBuffer.offset, sizeof(UpdateStruct));
         uploadScratchBufferToGpuUniformBuffer(state.uniformBuffer, region,
             VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT);
-
-
 
         VkBufferMemoryBarrier2 barriers[] = {
             bufferBarrier(state.modelVerticesBuffer,
@@ -425,13 +421,13 @@ int sRun(State &state)
     state.graphicsPipelineLayout = createPipelineLayout(state.descriptorSetLayout);
     state.computePipelineLayout = createPipelineLayout(state.descriptorSetLayout);
 
-    static const DescriptorInfo graphicsDescritorSetInfos[] = {
+    static const DescriptorInfo descritorSetInfos[] = {
         DescriptorInfo(state.modelVerticesBuffer, 0, state.modelVerticesBuffer.size),
         DescriptorInfo(state.uniformBuffer),
     };
 
     if(!updateBindDescriptorSet(state.descriptorSet,
-        graphicsDescriptorLayouts, graphicsDescritorSetInfos, ARRAYSIZES(graphicsDescritorSetInfos)))
+        graphicsDescriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
     {
         printf("Failed to update descriptorset\n");
         return 1;
@@ -455,8 +451,7 @@ int sRun(State &state)
         return 9;
     }
 
-    const CarpSwapChainFormats& swapchainFormats = getSwapChainFormats();
-    const VkFormat colorFormats[] = { swapchainFormats.defaultColorFormat };
+    const VkFormat colorFormats[] = { getSwapChainFormats().defaultColorFormat };
 
     const VkPipelineShaderStageCreateInfo stageInfos[] = {
         createDefaultVertexInfo(state.shaderModules[0]),
@@ -561,17 +556,6 @@ int sRun(State &state)
         beginFrame();
         sDraw(state);
         presentImage(state.image);
-
-        int width = SCREEN_WIDTH;
-        int height = SCREEN_HEIGHT;
-        sGetWindowSize(&width, &height, &state);
-
-        if(state.image.width != width || state.image.height != height)
-        {
-            VK_CHECK_CALL(vkDeviceWaitIdle(getVkDevice()));
-            sCreateImage(state);
-        }
-
 
         static int MaxTicks = 100;
         if(++updateTick >= MaxTicks)
