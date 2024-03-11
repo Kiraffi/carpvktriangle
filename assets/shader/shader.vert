@@ -1,6 +1,5 @@
 #version 450
-#define MATRIX_ORDER row_major
-//#define MATRIX_ORDER column_major
+#include "common.h"
 
 vec2 positions[3] = vec2[](
     vec2(0.5, -0.5),
@@ -18,15 +17,15 @@ struct VData
 layout (set = 0, binding = 0, MATRIX_ORDER) restrict readonly buffer VertexDataBuffer
 {
     VData vData[];
-} VertData;
+} vertData;
 
 layout (location = 0) out vec4 colOut;
 
 
 void main()
 {
-    vec3 pos = VertData.vData[gl_VertexIndex].pos;
-    uint col = VertData.vData[gl_VertexIndex].color;
+    vec3 pos = vertData.vData[gl_VertexIndex].pos;
+    uint col = vertData.vData[gl_VertexIndex].color;
     gl_Position = vec4(pos, 1.0);
 
     colOut = vec4(

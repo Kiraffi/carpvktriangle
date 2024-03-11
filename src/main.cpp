@@ -29,14 +29,20 @@ struct State
 
     VkDescriptorSetLayout descriptorSetLayout = {};
 
-    VkPipelineLayout pipelineLayout = {};
-    VkPipeline pipeline = {};
+    VkPipelineLayout graphicsPipelineLayout = {};
+    VkPipeline graphicsPipeline = {};
 
-    VkShaderModule shaderModules[2] = {};
+    VkPipelineLayout computePipelineLayout = {};
+    VkPipeline computePipeline = {};
 
-    VkDescriptorSet descriptorSets[16] = {};
+    VkShaderModule shaderModules[3] = {};
+
+    VkDescriptorSet descriptorSet = {};
     Buffer modelVerticesBuffer = {};
+    UniformBuffer uniformBuffer = {};
     Image image = {};
+
+    uint64_t ticksAtStart = {};
 };
 
 
@@ -59,104 +65,67 @@ static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
     return true;
 }
 
-void sDeinitShaders(void* data)
+void sDeinitShaders(void* userData)
 {
-    State *state = (State *) data;
+    State *state = (State *) userData;
 
     VkDevice device = getVkDevice();
 
     destroyImage(state->image);
 
-    destroyShaderModule(state->shaderModules, 2);
+    destroyShaderModule(state->shaderModules, ARRAYSIZES(state->shaderModules));
     destroyBuffer(state->modelVerticesBuffer);
     vkDestroyDescriptorSetLayout(device, state->descriptorSetLayout, nullptr);
-    vkDestroyPipeline(device, state->pipeline, nullptr);
-    vkDestroyPipelineLayout(device, state->pipelineLayout, nullptr);
-    state->pipelineLayout = {};
+    vkDestroyPipeline(device, state->graphicsPipeline, nullptr);
+    vkDestroyPipeline(device, state->computePipeline, nullptr);
+    vkDestroyPipelineLayout(device, state->graphicsPipelineLayout, nullptr);
+    state->graphicsPipelineLayout = {};
+
+    vkDestroyPipelineLayout(device, state->computePipelineLayout, nullptr);
+    state->computePipelineLayout = {};
+
+}
+void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
+{
+    State* state = (State*) userData;
+    SDL_GetWindowSize(state->window, widthOut, heightOut);
 }
 
 
-
-
-
-
-bool sDraw(State& state)
+bool sCreateImage(State& state)
 {
     int width = SCREEN_WIDTH;
     int height = SCREEN_HEIGHT;
-
-    VkCommandBuffer commandBuffer = getVkCommandBuffer();
+    sGetWindowSize(&width, &height, &state);
+    if(width == state.image.width && height == state.image.height)
     {
-        VkImageMemoryBarrier2 imgBarrier[] = {
-            imageBarrier(state.image, 
-                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-        };
-        VkDependencyInfoKHR dep2 = {};
-        dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO_KHR;
-        dep2.imageMemoryBarrierCount = ARRAYSIZES(imgBarrier);
-        dep2.pImageMemoryBarriers = imgBarrier;
-
-        vkCmdPipelineBarrier2(commandBuffer, &dep2);
-
+        return true;
     }
 
-    // New structures are used to define the attachments used in dynamic rendering
-    VkRenderingAttachmentInfoKHR colorAttachment{};
-    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-    colorAttachment.imageView = state.image.view;
-    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.clearValue.color = { 0.0f,0.0f,0.0f,0.0f };
-
-    /*
-    // A single depth stencil attachment info can be used, but they can also be specified separately.
-    // When both are specified separately, the only requirement is that the image view is identical.
-    VkRenderingAttachmentInfoKHR depthStencilAttachment{};
-    depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR;
-    depthStencilAttachment.imageView = depthStencil.view;
-    depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthStencilAttachment.clearValue.depthStencil = { 1.0f,  0 };
-    */
-
-    VkRenderingInfoKHR renderingInfo{};
-    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
-    renderingInfo.renderArea = { 0, 0, u32(width), u32(height) };
-    renderingInfo.layerCount = 1;
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments = &colorAttachment;
-    //renderingInfo.pDepthAttachment = &depthStencilAttachment;
-    //renderingInfo.pStencilAttachment = &depthStencilAttachment;
-
-    // Begin dynamic rendering
-    vkCmdBeginRendering(commandBuffer, &renderingInfo);
-
-    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipelineLayout,
-        0, 1, state.descriptorSets,
-        0, NULL);
+    destroyImage(state.image);
 
 
-    VkViewport viewport = { 0.0f, float(height), float(width), -float(height), 0.0f, 1.0f };
-    VkRect2D scissors = { { 0, 0 }, { u32(width), u32(height) } };
-
-    vkCmdSetScissor(commandBuffer, 0, 1, &scissors);
-    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.pipeline);
-
-    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-
-    // End dynamic rendering
-    vkCmdEndRendering(commandBuffer);
+    const CarpSwapChainFormats& swapchainFormats = getSwapChainFormats();
+    if(!createImage(width, height, swapchainFormats.defaultColorFormat,
+        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+            | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        "Render target", state.image))
+    {
+        printf("Failed to recreate render target image\n");
+        return false;
+    }
     return true;
 }
 
-static VkSurfaceKHR sCreateSurface(VkInstance instance, void* ptr)
+void sResized(void* userData)
 {
-    State* state = (State*)ptr;
+    State* state = (State*) userData;
+    sCreateImage(*state);
+}
+
+static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
+{
+    State* state = (State*)userData;
     VkSurfaceKHR surface;
     if(SDL_Vulkan_CreateSurface(state->window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
     {
@@ -170,6 +139,137 @@ static VkSurfaceKHR sCreateSurface(VkInstance instance, void* ptr)
     }
     return surface;
 }
+
+
+
+bool sDraw(State& state)
+{
+    int width = SCREEN_WIDTH;
+    int height = SCREEN_HEIGHT;
+    sGetWindowSize(&width, &height, &state);
+
+    VkCommandBuffer commandBuffer = getVkCommandBuffer();
+
+    state.modelVerticesBuffer.accessMask = VK_ACCESS_2_NONE;
+    state.modelVerticesBuffer.stageMask = VK_PIPELINE_STAGE_2_NONE;
+    // Compute
+    {
+        struct UpdateStruct
+        {
+            uint32_t totalTimeMs;
+            uint32_t padding[63];
+        };
+
+        UpdateStruct data = {
+            .totalTimeMs = uint32_t((SDL_GetTicksNS() - state.ticksAtStart) / 1000),
+        };
+        BufferCopyRegion region = uploadToScratchbuffer(
+            &data, state.uniformBuffer.offset, sizeof(UpdateStruct));
+        uploadScratchBufferToGpuUniformBuffer(state.uniformBuffer, region,
+            VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_COPY_BIT);
+
+
+
+        VkBufferMemoryBarrier2 barriers[] = {
+            bufferBarrier(state.modelVerticesBuffer,
+                VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+            bufferBarrier(state.uniformBuffer,
+                VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT),
+        };
+
+
+        VkDependencyInfo dependencyInfo = {};
+        dependencyInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dependencyInfo.bufferMemoryBarrierCount = ARRAYSIZES(barriers);
+        dependencyInfo.pBufferMemoryBarriers = barriers;
+
+        vkCmdPipelineBarrier2(commandBuffer, &dependencyInfo);
+
+
+        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, state.computePipelineLayout,
+    0, 1, &state.descriptorSet,
+    0, NULL);
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, state.computePipeline);
+        vkCmdDispatch(commandBuffer, 1, 1, 1);
+    }
+
+
+
+    {
+        VkImageMemoryBarrier2 imgBarrier[] = {
+            imageBarrier(state.image, 
+                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        };
+        VkBufferMemoryBarrier2 bufBar = bufferBarrier(state.modelVerticesBuffer,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
+            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+
+        VkDependencyInfo dep2 = {};
+        dep2.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dep2.imageMemoryBarrierCount = ARRAYSIZES(imgBarrier);
+        dep2.pImageMemoryBarriers = imgBarrier;
+        dep2.bufferMemoryBarrierCount = 1;
+        dep2.pBufferMemoryBarriers = &bufBar;
+
+        vkCmdPipelineBarrier2(commandBuffer, &dep2);
+
+
+    }
+
+    // New structures are used to define the attachments used in dynamic rendering
+    VkRenderingAttachmentInfo colorAttachment{};
+    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    colorAttachment.imageView = state.image.view;
+    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.clearValue.color = { 0.0f,0.0f,0.0f,0.0f };
+
+    /*
+    // A single depth stencil attachment info can be used, but they can also be specified separately.
+    // When both are specified separately, the only requirement is that the image view is identical.
+    VkRenderingAttachmentInfo depthStencilAttachment{};
+    depthStencilAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthStencilAttachment.imageView = depthStencil.view;
+    depthStencilAttachment.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthStencilAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthStencilAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthStencilAttachment.clearValue.depthStencil = { 1.0f,  0 };
+    */
+
+    VkRenderingInfo renderingInfo{};
+    renderingInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderingInfo.renderArea = { 0, 0, u32(width), u32(height) };
+    renderingInfo.layerCount = 1;
+    renderingInfo.colorAttachmentCount = 1;
+    renderingInfo.pColorAttachments = &colorAttachment;
+    //renderingInfo.pDepthAttachment = &depthStencilAttachment;
+    //renderingInfo.pStencilAttachment = &depthStencilAttachment;
+
+    // Begin dynamic rendering
+    vkCmdBeginRendering(commandBuffer, &renderingInfo);
+
+    vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.graphicsPipelineLayout,
+        0, 1, &state.descriptorSet,
+        0, NULL);
+
+
+    VkViewport viewport = { 0.0f, float(height), float(width), -float(height), 0.0f, 1.0f };
+    VkRect2D scissors = { { 0, 0 }, { u32(width), u32(height) } };
+
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissors);
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, state.graphicsPipeline);
+
+    vkCmdDraw(commandBuffer, 6, 1, 0, 0);
+
+    // End dynamic rendering
+    vkCmdEndRendering(commandBuffer);
+    return true;
+}
+
 
 float clamp(float v, float minValue, float maxValue)
 {
@@ -191,10 +291,32 @@ uint32_t sGetColor(float r, float g, float b, float a)
     return color;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/////////
+///
+/// SRun
+///
+/////////
 int sRun(State &state)
 {
     std::vector<char> fragShaderCode;
     std::vector<char> vertShaderCode;
+    std::vector<char> compShaderCode;
 
     if(!sReadFile("assets/shader/vert.spv", vertShaderCode))
     {
@@ -207,6 +329,11 @@ int sRun(State &state)
         return false;
     }
 
+    if(!sReadFile("assets/shader/compshader.spv", compShaderCode))
+    {
+        printf("Failed to read compute shader\n");
+        return false;
+    }
     // Create window
     SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL3
 
@@ -215,8 +342,7 @@ int sRun(State &state)
         "An SDL3 window",
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
-        SDL_WINDOW_VULKAN
-        //SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
+        SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE
     );
 
     // Check that the window was successfully created
@@ -229,18 +355,23 @@ int sRun(State &state)
     {
         VK_EXT_DEBUG_UTILS_EXTENSION_NAME,
     };
+    int width = SCREEN_WIDTH;
+    int height = SCREEN_HEIGHT;
+    sGetWindowSize(&width, &height, &state);
 
     VulkanInstanceParams vkInstanceParams = {
         .getExtraExtensionsFn = SDL_Vulkan_GetInstanceExtensions,
         .createSurfaceFn = sCreateSurface,
         .destroyBuffersFn = sDeinitShaders,
-        .pData = &state,
+        .getWindowSizeFn = sGetWindowSize,
+        .resizedFn = sResized,
+        .userData = &state,
 #if !NDEBUG
         .extensions = extensions,
         .extensionCount = ARRAYSIZES(extensions),
 #endif
-        .width = SCREEN_WIDTH,
-        .height = SCREEN_HEIGHT,
+        .width = width,
+        .height = height,
         .vsyncMode = VSyncType::IMMEDIATE_NO_VSYNC,
 #if !NDEBUG
         .useValidation = true,
@@ -254,7 +385,6 @@ int sRun(State &state)
         return 1;
     }
 
-    VkDevice device = getVkDevice();
     if(!createBuffer(1024u * 1024u * 16u,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Model Vercies data buffer",
@@ -264,44 +394,49 @@ int sRun(State &state)
         return 2;
     }
 
-    static constexpr DescriptorSetLayout descriptorLayouts[] =
+
+    static constexpr DescriptorSetLayout graphicsDescriptorLayouts[] =
     {
         {
             .bindingIndex = 0,
             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT
         },
+        {
+            .bindingIndex = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+        },
+
     };
 
-    state.descriptorSetLayout = createSetLayout(descriptorLayouts, ARRAYSIZES(descriptorLayouts));
-    if(!createDescriptorSet(state.descriptorSetLayout,
-        descriptorLayouts, ARRAYSIZES(descriptorLayouts),
-        state.descriptorSets))
+    state.descriptorSetLayout =
+        createSetLayout(graphicsDescriptorLayouts, ARRAYSIZES(graphicsDescriptorLayouts));
+
+    if(!createDescriptorSet(state.descriptorSetLayout, &state.descriptorSet))
     {
         printf("Failed to create descriptorset\n");
         return 2;
     }
 
 
+    state.uniformBuffer = createUniformBuffer(256);
 
 
-    VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &state.descriptorSetLayout;
+    state.graphicsPipelineLayout = createPipelineLayout(state.descriptorSetLayout);
+    state.computePipelineLayout = createPipelineLayout(state.descriptorSetLayout);
 
-    VK_CHECK_CALL(vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, nullptr, &state.pipelineLayout));
-
-    static const DescriptorInfo descritorSetInfos[] = {
+    static const DescriptorInfo graphicsDescritorSetInfos[] = {
         DescriptorInfo(state.modelVerticesBuffer, 0, state.modelVerticesBuffer.size),
+        DescriptorInfo(state.uniformBuffer),
     };
 
-    if(!updateBindDescriptorSet(state.descriptorSets,
-        descriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
+    if(!updateBindDescriptorSet(state.descriptorSet,
+        graphicsDescriptorLayouts, graphicsDescritorSetInfos, ARRAYSIZES(graphicsDescritorSetInfos)))
     {
         printf("Failed to update descriptorset\n");
         return 1;
     }
-
 
     if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.shaderModules[0]))
     {
@@ -311,61 +446,54 @@ int sRun(State &state)
 
     if(!createShader(fragShaderCode.data(), fragShaderCode.size(), state.shaderModules[1]))
     {
-        printf("Failed to create vert shader!\n");
+        printf("Failed to create frag shader!\n");
         return 9;
     }
+
+    if(!createShader(compShaderCode.data(), compShaderCode.size(), state.shaderModules[2]))
+    {
+        printf("Failed to create comp shader!\n");
+        return 9;
+    }
+
     const CarpSwapChainFormats& swapchainFormats = getSwapChainFormats();
     const VkFormat colorFormats[] = { swapchainFormats.defaultColorFormat };
 
-    VkPipelineColorBlendAttachmentState blendStates[] = {
-        {
-            .blendEnable = VK_FALSE,
-            .colorWriteMask =
-                VK_COLOR_COMPONENT_R_BIT |
-                VK_COLOR_COMPONENT_G_BIT |
-                VK_COLOR_COMPONENT_B_BIT |
-                VK_COLOR_COMPONENT_A_BIT
-        },
-    };
-
     const VkPipelineShaderStageCreateInfo stageInfos[] = {
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT,
-            .module = state.shaderModules[0],
-            .pName = "main",
-        },
-        {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-            .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-            .module = state.shaderModules[1],
-            .pName = "main",
-        }
+        createDefaultVertexInfo(state.shaderModules[0]),
+        createDefaultFragmentInfo(state.shaderModules[1]),
     };
-
-
 
     GPBuilder gpBuilder = {
         .stageInfos = stageInfos,
         .colorFormats = colorFormats,
-        .blendChannels = blendStates,
-        .pipelineLayout = state.pipelineLayout,
+        .blendChannels = &cDefaultBlendState,
+        .pipelineLayout = state.graphicsPipelineLayout,
         .stageInfoCount = ARRAYSIZES(stageInfos),
         .colorFormatCount = ARRAYSIZES(colorFormats),
-        .blendChannelCount = ARRAYSIZES(blendStates),
+        .blendChannelCount = 1,
     };
-    state.pipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
+    state.graphicsPipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
 
-    if(!state.pipeline)
+    if(!state.graphicsPipeline)
     {
         printf("Failed to create graphics pipeline\n");
         return 8;
     }
 
-    if(!createImage(SCREEN_WIDTH, SCREEN_HEIGHT, swapchainFormats.defaultColorFormat,
-        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-            | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        "Render target", state.image))
+    CPBuilder cpBuilder = {
+        .stageInfo = createDefaultComputeInfo(state.shaderModules[2]),
+        .pipelineLayout = state.computePipelineLayout,
+    };
+
+    state.computePipeline = createComputePipeline(cpBuilder, "Compute pipeline");
+    if(!state.computePipeline)
+    {
+        printf("Failed to create compute pipeline\n");
+        return 2;
+    }
+
+    if(!sCreateImage(state))
     {
         printf("Failed to create image\n");
         return 8;
@@ -386,6 +514,10 @@ int sRun(State &state)
             {-0.5, -0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
             {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
 
+            {0.0, 0.5f, 0.5f, sGetColor(0.0f, 1.0f, 0.0f, 1.0f)},
+            {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
+            {0.5, 0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
+
         };
         beginPreFrame();
         BufferCopyRegion region = uploadToScratchbuffer(vData, 0, sizeof(vData));
@@ -398,7 +530,7 @@ int sRun(State &state)
     char tmpBuf[256] = {};
     int updateTick = 0;
     uint64_t lastTicks = SDL_GetTicksNS();
-
+    state.ticksAtStart = lastTicks;
     bool quit = false;
     //While application is running
     while( !quit )
@@ -424,9 +556,24 @@ int sRun(State &state)
                     break;
             }
         }
+
+
+
         beginFrame();
         sDraw(state);
         presentImage(state.image);
+
+        int width = SCREEN_WIDTH;
+        int height = SCREEN_HEIGHT;
+        sGetWindowSize(&width, &height, &state);
+
+        if(state.image.width != width || state.image.height != height)
+        {
+            VK_CHECK_CALL(vkDeviceWaitIdle(getVkDevice()));
+            sCreateImage(state);
+        }
+
+
         static int MaxTicks = 100;
         if(++updateTick >= MaxTicks)
         {
