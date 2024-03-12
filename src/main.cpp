@@ -152,11 +152,11 @@ bool sDraw(State& state)
         uploadToUniformBuffer(state.uniformBuffer, &data, sizeof(UpdateStruct));
 
         bufferBarrier(state.modelVerticesBuffer,
-            VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
         flushBarriers();
 
         bufferBarrier(state.uniformBuffer,
-            VK_ACCESS_2_SHADER_READ_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+            VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
         flushBarriers();
 
@@ -174,8 +174,8 @@ bool sDraw(State& state)
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         
         bufferBarrier(state.modelVerticesBuffer,
-            VK_ACCESS_2_SHADER_STORAGE_READ_BIT,
-            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
+            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
 
         flushBarriers();
     }
