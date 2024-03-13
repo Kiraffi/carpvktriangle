@@ -57,7 +57,7 @@ static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
     return true;
 }
 
-void sDeinitShaders(void* userData)
+static void sDeinitShaders(void* userData)
 {
     State *state = (State *) userData;
 
@@ -73,14 +73,14 @@ void sDeinitShaders(void* userData)
     vkDestroyPipelineLayout(device, state->graphicsPipelineLayout, nullptr);
     state->graphicsPipelineLayout = {};
 }
-void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
+static void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
 {
     State* state = (State*) userData;
     SDL_GetWindowSize(state->window, widthOut, heightOut);
 }
 
 
-bool sCreateImage(State& state)
+static bool sCreateImage(State& state)
 {
     int width = 0;
     int height = 0;
@@ -105,7 +105,7 @@ bool sCreateImage(State& state)
     return true;
 }
 
-void sResized(void* userData)
+static void sResized(void* userData)
 {
     State* state = (State*) userData;
     sCreateImage(*state);
@@ -130,7 +130,7 @@ static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
 
 
 
-bool sDraw(State& state)
+static bool sDraw(State& state)
 {
     int width = state.image.width;
     int height = state.image.height;
@@ -206,7 +206,7 @@ float clamp(float v, float minValue, float maxValue)
     return v;
 }
 
-uint32_t sGetColor(float r, float g, float b, float a)
+static uint32_t sGetColor(float r, float g, float b, float a)
 {
     r = clamp(r, 0.0f, 1.0f);
     g = clamp(g, 0.0f, 1.0f);
@@ -240,7 +240,7 @@ uint32_t sGetColor(float r, float g, float b, float a)
 /// SRun
 ///
 /////////
-int sRun(State &state)
+static int sRun(State &state)
 {
     std::vector<char> fragShaderCode;
     std::vector<char> vertShaderCode;
