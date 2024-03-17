@@ -18,23 +18,25 @@ static const int SCREEN_HEIGHT = 768;
 
 struct State
 {
-    SDL_Window *window = nullptr;
+    SDL_Window* m_window = nullptr;
 
-    VkDescriptorSetLayout descriptorSetLayout = {};
+    VkDescriptorSetLayout m_descriptorSetLayout = {};
 
-    VkPipelineLayout graphicsPipelineLayout = {};
-    VkPipeline graphicsPipeline = {};
+    VkPipelineLayout m_graphicsPipelineLayout = {};
+    VkPipeline m_graphicsPipeline = {};
 
-    VkPipeline computePipeline = {};
+    VkPipeline m_computePipeline = {};
 
-    VkShaderModule shaderModules[3] = {};
+    VkShaderModule m_shaderModules[3] = {};
 
-    VkDescriptorSet descriptorSet = {};
-    Buffer modelVerticesBuffer = {};
-    UniformBuffer uniformBuffer = {};
-    Image image = {};
+    VkDescriptorSet m_descriptorSet = {};
+    Buffer m_modelVerticesBuffer = {};
+    UniformBuffer m_uniformBuffer = {};
+    Image m_image = {};
+    Image m_sampledImage = {};
 
-    uint64_t ticksAtStart = {};
+    VkSampler m_sampler = {};
+    uint64_t m_ticksAtStart = {};
 };
 
 
@@ -63,59 +65,94 @@ static void sDeinitShaders(void* userData)
 
     VkDevice device = getVkDevice();
 
-    destroyImage(state->image);
+    destroySampler(state->m_sampler);
+    destroyImage(state->m_image);
+    destroyImage(state->m_sampledImage);
 
-    destroyShaderModule(state->shaderModules, ARRAYSIZES(state->shaderModules));
-    destroyBuffer(state->modelVerticesBuffer);
-    vkDestroyDescriptorSetLayout(device, state->descriptorSetLayout, nullptr);
-    vkDestroyPipeline(device, state->graphicsPipeline, nullptr);
-    vkDestroyPipeline(device, state->computePipeline, nullptr);
-    vkDestroyPipelineLayout(device, state->graphicsPipelineLayout, nullptr);
-    state->graphicsPipelineLayout = {};
+    destroyShaderModule(state->m_shaderModules, ARRAYSIZES(state->m_shaderModules));
+    destroyBuffer(state->m_modelVerticesBuffer);
+    vkDestroyDescriptorSetLayout(device, state->m_descriptorSetLayout, nullptr);
+    vkDestroyPipeline(device, state->m_graphicsPipeline, nullptr);
+    vkDestroyPipeline(device, state->m_computePipeline, nullptr);
+    vkDestroyPipelineLayout(device, state->m_graphicsPipelineLayout, nullptr);
+    state->m_graphicsPipelineLayout = {};
 }
 static void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
 {
     State* state = (State*) userData;
-    SDL_GetWindowSize(state->window, widthOut, heightOut);
+    SDL_GetWindowSize(state->m_window, widthOut, heightOut);
 }
 
 
-static bool sCreateImage(State& state)
+static bool sCreateRenderTargetImage(State& state)
 {
     int width = 0;
     int height = 0;
     sGetWindowSize(&width, &height, &state);
-    if(width == state.image.width && height == state.image.height)
+    if(width == state.m_image.width && height == state.m_image.height)
     {
         return true;
     }
 
-    destroyImage(state.image);
+    destroyImage(state.m_image);
 
 
     const CarpSwapChainFormats& swapchainFormats = getSwapChainFormats();
     if(!createImage(width, height, swapchainFormats.defaultColorFormat,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
             | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        "Render target", state.image))
+        "Render target", state.m_image))
     {
         printf("Failed to recreate render target image\n");
         return false;
     }
     return true;
 }
+static bool sCreateImages(State& state)
+{
+    //VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    static constexpr int width = 256;
+    static constexpr int height = 256;
+    if(!createImage(width, height, VK_FORMAT_R8G8B8A8_SRGB,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        "Sampler target", state.m_sampledImage))
+    {
+        printf("Failed to create sampler target image\n");
+        return false;
+    }
+
+    std::vector<u32> picData;
+    picData.resize(width * height);
+    for(int y = 0; y < height; ++y)
+    {
+        for(int x = 0; x < width; ++x)
+        {
+            u32 pixel = 255 << 24;
+            pixel |= x << 0;
+            pixel |= y << 8;
+            picData[x + y * width] = pixel;
+        }
+    }
+
+    uploadToImage(width, height, 4, state.m_sampledImage,
+        picData.data(), picData.size() * 4u);
+
+
+    return sCreateRenderTargetImage(state);
+}
+
 
 static void sResized(void* userData)
 {
     State* state = (State*) userData;
-    sCreateImage(*state);
+    sCreateRenderTargetImage(*state);
 }
 
 static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
 {
     State* state = (State*)userData;
     VkSurfaceKHR surface;
-    if(SDL_Vulkan_CreateSurface(state->window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
+    if(SDL_Vulkan_CreateSurface(state->m_window, getVkInstance(), nullptr, &surface) == SDL_FALSE)
     {
         printf("Failed to create surface\n");
         return {};
@@ -132,8 +169,8 @@ static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
 
 static bool sDraw(State& state)
 {
-    int width = state.image.width;
-    int height = state.image.height;
+    int width = state.m_image.width;
+    int height = state.m_image.height;
 
     VkCommandBuffer commandBuffer = getVkCommandBuffer();
 
@@ -146,21 +183,21 @@ static bool sDraw(State& state)
         };
 
         UpdateStruct data = {
-            .totalTimeMs = uint32_t((SDL_GetTicksNS() - state.ticksAtStart) / 1000),
+            .totalTimeMs = uint32_t((SDL_GetTicksNS() - state.m_ticksAtStart) / 1000),
         };
 
-        uploadToUniformBuffer(state.uniformBuffer, &data, sizeof(UpdateStruct));
+        uploadToUniformBuffer(state.m_uniformBuffer, &data, sizeof(UpdateStruct));
 
-        bufferBarrier(state.modelVerticesBuffer,
+        bufferBarrier(state.m_modelVerticesBuffer,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
         flushBarriers();
 
-        bufferBarrier(state.uniformBuffer,
+        bufferBarrier(state.m_uniformBuffer,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
         flushBarriers();
 
-        beginComputePipeline(state.graphicsPipelineLayout, state.computePipeline, state.descriptorSet);
+        beginComputePipeline(state.m_graphicsPipelineLayout, state.m_computePipeline, state.m_descriptorSet);
         vkCmdDispatch(commandBuffer, 1, 1, 1);
         endComputePipeline();
     }
@@ -168,12 +205,12 @@ static bool sDraw(State& state)
 
 
     {
-        imageBarrier(state.image,
+        imageBarrier(state.m_image,
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
         
-        bufferBarrier(state.modelVerticesBuffer,
+        bufferBarrier(state.m_modelVerticesBuffer,
             VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
             VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
 
@@ -184,14 +221,14 @@ static bool sDraw(State& state)
     {
         {
             .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 0.0f } },
-            .image = &state.image,
+            .image = &state.m_image,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE
         }
     };
 
     beginRenderPipeline(colorAttachments, ARRAYSIZES(colorAttachments), nullptr,
-        state.graphicsPipelineLayout, state.graphicsPipeline, state.descriptorSet);
+        state.m_graphicsPipelineLayout, state.m_graphicsPipeline, state.m_descriptorSet);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     endRenderPipeline();
 
@@ -266,7 +303,7 @@ static int sRun(State &state)
     SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL3
 
     // Create an application window with the following settings:
-    state.window = SDL_CreateWindow(
+    state.m_window = SDL_CreateWindow(
         "An SDL3 window",
         SCREEN_WIDTH,
         SCREEN_HEIGHT,
@@ -274,7 +311,7 @@ static int sRun(State &state)
     );
 
     // Check that the window was successfully created
-    if (state.window == NULL)
+    if (state.m_window == NULL)
     {
         // In the case that the window could not be made...
         printf("Could not create window: %s\n", SDL_GetError());
@@ -317,14 +354,56 @@ static int sRun(State &state)
     if(!createBuffer(1024u * 1024u * 16u,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "Model Vercies data buffer",
-        state.modelVerticesBuffer))
+        state.m_modelVerticesBuffer))
     {
         printf("Failed to create model vertice data buffer\n");
         return 2;
     }
 
+    VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
 
-    static constexpr DescriptorSetLayout graphicsDescriptorLayouts[] =
+    state.m_sampler = createSampler(samplerInfo);
+
+    {
+        beginPreFrame();
+        if(!sCreateImages(state))
+        {
+            printf("Failed to create images\n");
+            return 8;
+        }
+
+        {
+            struct VData
+            {
+                float posX;
+                float posY;
+                float posZ;
+                uint32_t color;
+            };
+
+            VData vData[] =
+            {
+                {0.0, 0.5f, 0.5f, sGetColor(0.0f, 1.0f, 0.0f, 1.0f)},
+                {-0.5, -0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
+                {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
+
+                {0.0, 0.5f, 0.5f, sGetColor(0.0f, 1.0f, 0.0f, 1.0f)},
+                {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
+                {0.5, 0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
+
+            };
+            uploadToGpuBuffer(state.m_modelVerticesBuffer, vData, 0, sizeof(vData));
+            imageBarrier(state.m_sampledImage,
+                VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT,
+                VK_IMAGE_LAYOUT_GENERAL);
+            flushBarriers();
+        }
+        endPreFrame();
+    }
+
+    static DescriptorSetLayout graphicsDescriptorLayouts[] =
     {
         {
             .bindingIndex = 0,
@@ -336,39 +415,48 @@ static int sRun(State &state)
             .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
             .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
         },
+        {
+            .bindingIndex = 2,
+            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .stage = VK_SHADER_STAGE_VERTEX_BIT
+                | VK_SHADER_STAGE_FRAGMENT_BIT
+                | VK_SHADER_STAGE_COMPUTE_BIT,
+            //.immutableSampler = state.m_sampler,
+        },
 
     };
 
-    state.descriptorSetLayout =
+    state.m_descriptorSetLayout =
         createSetLayout(graphicsDescriptorLayouts, ARRAYSIZES(graphicsDescriptorLayouts));
 
-    if(!createDescriptorSet(state.descriptorSetLayout, &state.descriptorSet))
+    if(!createDescriptorSet(state.m_descriptorSetLayout, &state.m_descriptorSet))
     {
         printf("Failed to create descriptorset\n");
         return 2;
     }
 
 
-    state.uniformBuffer = createUniformBuffer(256);
+    state.m_uniformBuffer = createUniformBuffer(256);
 
 
-    state.graphicsPipelineLayout = createPipelineLayout(state.descriptorSetLayout);
+    state.m_graphicsPipelineLayout = createPipelineLayout(state.m_descriptorSetLayout);
 
     static const DescriptorInfo descritorSetInfos[] = {
-        DescriptorInfo(state.modelVerticesBuffer, 0, state.modelVerticesBuffer.size),
-        DescriptorInfo(state.uniformBuffer),
+        DescriptorInfo(state.m_modelVerticesBuffer, 0, state.m_modelVerticesBuffer.size),
+        DescriptorInfo(state.m_uniformBuffer),
+        DescriptorInfo(state.m_sampledImage.view, VK_IMAGE_LAYOUT_GENERAL, state.m_sampler),
     };
 
-    if(!updateBindDescriptorSet(state.descriptorSet,
+    if(!updateBindDescriptorSet(state.m_descriptorSet,
         graphicsDescriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
     {
         printf("Failed to update descriptorset\n");
         return 1;
     }
 
-    if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.shaderModules[0])
-        || !createShader(fragShaderCode.data(), fragShaderCode.size(), state.shaderModules[1])
-        || !createShader(compShaderCode.data(), compShaderCode.size(), state.shaderModules[2]))
+    if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.m_shaderModules[0])
+        || !createShader(fragShaderCode.data(), fragShaderCode.size(), state.m_shaderModules[1])
+        || !createShader(compShaderCode.data(), compShaderCode.size(), state.m_shaderModules[2]))
     {
         printf("Failed to create shaders!\n");
         return 9;
@@ -377,76 +465,44 @@ static int sRun(State &state)
     const VkFormat colorFormats[] = { getSwapChainFormats().defaultColorFormat };
 
     const VkPipelineShaderStageCreateInfo stageInfos[] = {
-        createDefaultVertexInfo(state.shaderModules[0]),
-        createDefaultFragmentInfo(state.shaderModules[1]),
+        createDefaultVertexInfo(state.m_shaderModules[0]),
+        createDefaultFragmentInfo(state.m_shaderModules[1]),
     };
 
     GPBuilder gpBuilder = {
         .stageInfos = stageInfos,
         .colorFormats = colorFormats,
         .blendChannels = &cDefaultBlendState,
-        .pipelineLayout = state.graphicsPipelineLayout,
+        .pipelineLayout = state.m_graphicsPipelineLayout,
         .stageInfoCount = ARRAYSIZES(stageInfos),
         .colorFormatCount = ARRAYSIZES(colorFormats),
         .blendChannelCount = 1,
     };
-    state.graphicsPipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
+    state.m_graphicsPipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
 
-    if(!state.graphicsPipeline)
+    if(!state.m_graphicsPipeline)
     {
         printf("Failed to create graphics pipeline\n");
         return 8;
     }
 
     CPBuilder cpBuilder = {
-        .stageInfo = createDefaultComputeInfo(state.shaderModules[2]),
-        .pipelineLayout = state.graphicsPipelineLayout,
+        .stageInfo = createDefaultComputeInfo(state.m_shaderModules[2]),
+        .pipelineLayout = state.m_graphicsPipelineLayout,
     };
 
-    state.computePipeline = createComputePipeline(cpBuilder, "Compute pipeline");
-    if(!state.computePipeline)
+    state.m_computePipeline = createComputePipeline(cpBuilder, "Compute pipeline");
+    if(!state.m_computePipeline)
     {
         printf("Failed to create compute pipeline\n");
         return 2;
-    }
-
-    if(!sCreateImage(state))
-    {
-        printf("Failed to create image\n");
-        return 8;
-    }
-
-    {
-        struct VData
-        {
-            float posX;
-            float posY;
-            float posZ;
-            uint32_t color;
-        };
-
-        VData vData[] =
-        {
-            {0.0, 0.5f, 0.5f, sGetColor(0.0f, 1.0f, 0.0f, 1.0f)},
-            {-0.5, -0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
-            {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
-
-            {0.0, 0.5f, 0.5f, sGetColor(0.0f, 1.0f, 0.0f, 1.0f)},
-            {0.5, -0.5f, 0.5f, sGetColor(0.0f, 0.0f, 1.0f, 1.0f)},
-            {0.5, 0.5f, 0.5f, sGetColor(1.0f, 0.0f, 0.0f, 1.0f)},
-
-        };
-        beginPreFrame();
-        uploadToGpuBuffer(state.modelVerticesBuffer, vData, 0, sizeof(vData));
-        flushBarriers();
-        endPreFrame();
     }
 
 
     char tmpBuf[256] = {};
     int updateTick = 0;
     uint64_t lastTicks = SDL_GetTicksNS();
-    state.ticksAtStart = lastTicks;
+    state.m_ticksAtStart = lastTicks;
     bool quit = false;
     //While application is running
     while( !quit )
@@ -475,7 +531,7 @@ static int sRun(State &state)
 
         beginFrame();
         sDraw(state);
-        presentImage(state.image);
+        presentImage(state.m_image);
 
         static int MaxTicks = 100;
         if(++updateTick >= MaxTicks)
@@ -487,7 +543,7 @@ static int sRun(State &state)
 
             SDL_snprintf(tmpBuf, 255, "FPS: %f - %fms", 1'000'000'000.0 / diff, diff / 1'000'000.0);
 
-            SDL_SetWindowTitle(state.window, tmpBuf);
+            SDL_SetWindowTitle(state.m_window, tmpBuf);
             updateTick = 0;
         }
         SDL_Delay(1);
@@ -508,7 +564,7 @@ int main()
     deinitVulkan();
 
     // Close and destroy the window
-    SDL_DestroyWindow(state.window);
+    SDL_DestroyWindow(state.m_window);
 
     // Clean up
     SDL_Quit();
