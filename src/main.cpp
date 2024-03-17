@@ -11,8 +11,6 @@
 #include <vector>
 #include <fstream>
 
-
-
 static const int SCREEN_WIDTH = 1024;
 static const int SCREEN_HEIGHT = 768;
 
@@ -39,25 +37,6 @@ struct State
     uint64_t m_ticksAtStart = {};
 };
 
-
-static bool sReadFile(const char* filename, std::vector<char>& outBuffer)
-{
-    std::ifstream file(filename, std::ios::ate | std::ios::binary);
-
-    if (!file.is_open())
-    {
-        printf("Failed to load file: %s\n", filename);
-        return false;
-    }
-
-    size_t fileSize = (size_t) file.tellg();
-    outBuffer.resize(fileSize);
-    file.seekg(0);
-    file.read(outBuffer.data(), fileSize);
-    file.close();
-
-    return true;
-}
 
 static void sDeinitShaders(void* userData)
 {
@@ -96,9 +75,7 @@ static bool sCreateRenderTargetImage(State& state)
 
     destroyImage(state.m_image);
 
-
-    const CarpSwapChainFormats& swapchainFormats = getSwapChainFormats();
-    if(!createImage(width, height, swapchainFormats.defaultColorFormat,
+    if(!createImage(width, height, VK_FORMAT_R8G8B8A8_SRGB,
         VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
             | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
         "Render target", state.m_image))
@@ -169,9 +146,6 @@ static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
 
 static bool sDraw(State& state)
 {
-    int width = state.m_image.width;
-    int height = state.m_image.height;
-
     VkCommandBuffer commandBuffer = getVkCommandBuffer();
 
     // Compute
@@ -201,8 +175,6 @@ static bool sDraw(State& state)
         vkCmdDispatch(commandBuffer, 1, 1, 1);
         endComputePipeline();
     }
-
-
 
     {
         imageBarrier(state.m_image,
@@ -279,26 +251,6 @@ static uint32_t sGetColor(float r, float g, float b, float a)
 /////////
 static int sRun(State &state)
 {
-    std::vector<char> fragShaderCode;
-    std::vector<char> vertShaderCode;
-    std::vector<char> compShaderCode;
-
-    if(!sReadFile("assets/shader/vert.spv", vertShaderCode))
-    {
-        printf("Failed to read vertex shader\n");
-        return false;
-    }
-    if(!sReadFile("assets/shader/frag.spv", fragShaderCode))
-    {
-        printf("Failed to read fragment shader\n");
-        return false;
-    }
-
-    if(!sReadFile("assets/shader/compshader.spv", compShaderCode))
-    {
-        printf("Failed to read compute shader\n");
-        return false;
-    }
     // Create window
     SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL3
 
@@ -421,7 +373,7 @@ static int sRun(State &state)
             .stage = VK_SHADER_STAGE_VERTEX_BIT
                 | VK_SHADER_STAGE_FRAGMENT_BIT
                 | VK_SHADER_STAGE_COMPUTE_BIT,
-            //.immutableSampler = state.m_sampler,
+            //not working properly .immutableSampler = state.m_sampler,
         },
 
     };
@@ -454,15 +406,15 @@ static int sRun(State &state)
         return 1;
     }
 
-    if(!createShader(vertShaderCode.data(), vertShaderCode.size(), state.m_shaderModules[0])
-        || !createShader(fragShaderCode.data(), fragShaderCode.size(), state.m_shaderModules[1])
-        || !createShader(compShaderCode.data(), compShaderCode.size(), state.m_shaderModules[2]))
+    if(!createShader("assets/shader/vert.spv", state.m_shaderModules[0])
+        || !createShader("assets/shader/frag.spv", state.m_shaderModules[1])
+        || !createShader("assets/shader/compshader.spv", state.m_shaderModules[2]))
     {
         printf("Failed to create shaders!\n");
         return 9;
     }
 
-    const VkFormat colorFormats[] = { getSwapChainFormats().defaultColorFormat };
+    const VkFormat colorFormats[] = { VK_FORMAT_R8G8B8A8_SRGB }; //getSwapChainFormats().defaultColorFormat };
 
     const VkPipelineShaderStageCreateInfo stageInfos[] = {
         createDefaultVertexInfo(state.m_shaderModules[0]),
