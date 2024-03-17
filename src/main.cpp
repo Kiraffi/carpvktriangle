@@ -311,11 +311,10 @@ static int sRun(State &state)
         return 2;
     }
 
-    VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-
-    state.m_sampler = createSampler(samplerInfo);
+    state.m_sampler = createSampler({
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+    });
 
     {
         beginPreFrame();
@@ -347,7 +346,7 @@ static int sRun(State &state)
             };
             uploadToGpuBuffer(state.m_modelVerticesBuffer, vData, 0, sizeof(vData));
             imageBarrier(state.m_sampledImage,
-                VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT,
+                VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             flushBarriers();
         }
