@@ -348,7 +348,7 @@ static int sRun(State &state)
             uploadToGpuBuffer(state.m_modelVerticesBuffer, vData, 0, sizeof(vData));
             imageBarrier(state.m_sampledImage,
                 VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT, VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT,
-                VK_IMAGE_LAYOUT_GENERAL);
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             flushBarriers();
         }
         endPreFrame();
@@ -395,7 +395,7 @@ static int sRun(State &state)
     static const DescriptorInfo descritorSetInfos[] = {
         DescriptorInfo(state.m_modelVerticesBuffer, 0, state.m_modelVerticesBuffer.size),
         DescriptorInfo(state.m_uniformBuffer),
-        DescriptorInfo(state.m_sampledImage.view, VK_IMAGE_LAYOUT_GENERAL, state.m_sampler),
+        DescriptorInfo(state.m_sampledImage.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, state.m_sampler),
     };
 
     if(!updateBindDescriptorSet(state.m_descriptorSet,
