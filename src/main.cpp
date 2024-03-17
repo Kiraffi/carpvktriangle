@@ -159,12 +159,12 @@ static bool sDraw(State& state)
             .totalTimeMs = uint32_t((SDL_GetTicksNS() - state.m_ticksAtStart) / 1000),
         };
 
+
         uploadToUniformBuffer(state.m_uniformBuffer, &data, sizeof(UpdateStruct));
 
         bufferBarrier(state.m_modelVerticesBuffer,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
         flushBarriers();
-
         bufferBarrier(state.m_uniformBuffer,
             VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
