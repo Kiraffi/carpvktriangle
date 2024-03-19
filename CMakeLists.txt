@@ -16,7 +16,7 @@ if (WIN32)
 endif (WIN32)
 
 
-add_executable(carpvktriangle src/main.cpp)
+add_executable(carpvktriangle src/main.cpp "src/mymemory.h" "src/mymemory.cpp")
 
 set(SDL_STATIC ON)
 set(SDL_SHARED OFF)

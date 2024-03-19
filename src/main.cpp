@@ -3,7 +3,6 @@
 #include <stdio.h>
 
 #include <carpvk.h>
-#include <common.h>
 
 #include <SDL3/SDL.h>
 #include "SDL_vulkan.h"
