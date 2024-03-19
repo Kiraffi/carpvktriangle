@@ -292,7 +292,7 @@ static int sRun(State &state)
 #if !NDEBUG
         .useValidation = true,
 #endif
-        .useIntegratedGpu = false, //true,
+        .useIntegratedGpu = true, //true,
     };
 
     if(!initVulkan(vkInstanceParams))
