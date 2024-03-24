@@ -10,8 +10,47 @@
 #include <vector>
 #include <fstream>
 
+#include "mymemory.h"
+
 static const int SCREEN_WIDTH = 1024;
 static const int SCREEN_HEIGHT = 768;
+
+enum ShaderTypes
+{
+    ShaderTypes_TwoDVert,
+    ShaderTypes_TwoDFrag,
+    ShaderTypes_FullScreenVert,
+    ShaderTypes_FullScreenFrag,
+    ShaderTypes_Compute,
+
+    ShaderTypes_Count
+};
+
+
+static DescriptorSetLayout sGraphicsDescriptorLayouts[] =
+{
+    {
+        .bindingIndex = 0,
+        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT
+    },
+    {
+        .bindingIndex = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+    },
+    {
+        .bindingIndex = 2,
+        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        .stage = VK_SHADER_STAGE_VERTEX_BIT
+            | VK_SHADER_STAGE_FRAGMENT_BIT
+            | VK_SHADER_STAGE_COMPUTE_BIT,
+        //not working properly .immutableSampler = state.m_sampler,
+    },
+
+};
+
+
 
 struct State
 {
@@ -22,67 +61,80 @@ struct State
     VkPipelineLayout m_graphicsPipelineLayout = {};
     VkPipeline m_graphicsPipeline = {};
 
+    VkPipeline m_secondGraphicsPipeline = {};
+
     VkPipeline m_computePipeline = {};
 
-    VkShaderModule m_shaderModules[3] = {};
+    VkShaderModule m_shaderModules[ShaderTypes_Count] = {};
 
     VkDescriptorSet m_descriptorSet = {};
+    VkDescriptorSet m_descriptorSetForSecondPass = {};
     Buffer m_modelVerticesBuffer = {};
     UniformBuffer m_uniformBuffer = {};
-    Image m_image = {};
+    //Image m_image = {};
     Image m_sampledImage = {};
 
     VkSampler m_sampler = {};
     uint64_t m_ticksAtStart = {};
+
+    int32_t m_whenToUpdateDescriptors = {};
 };
+
 
 
 static void sDeinitShaders(void* userData)
 {
     State *state = (State *) userData;
 
-    VkDevice device = getVkDevice();
-
     destroySampler(state->m_sampler);
-    destroyImage(state->m_image);
+    //destroyImage(state->m_image);
     destroyImage(state->m_sampledImage);
+
+    destroyMemory();
 
     destroyShaderModule(state->m_shaderModules, ARRAYSIZES(state->m_shaderModules));
     destroyBuffer(state->m_modelVerticesBuffer);
-    vkDestroyDescriptorSetLayout(device, state->m_descriptorSetLayout, nullptr);
-    vkDestroyPipeline(device, state->m_graphicsPipeline, nullptr);
-    vkDestroyPipeline(device, state->m_computePipeline, nullptr);
-    vkDestroyPipelineLayout(device, state->m_graphicsPipelineLayout, nullptr);
-    state->m_graphicsPipelineLayout = {};
+    destroyPipelines(&state->m_computePipeline, 1);
+    destroyPipelines(&state->m_graphicsPipeline, 1);
+    destroyPipelines(&state->m_secondGraphicsPipeline, 1);
+    destroyPipelineLayouts(&state->m_graphicsPipelineLayout, 1);
+
+    destroyDescriptorSetLayouts(&state->m_descriptorSetLayout, 1);
 }
+
 static void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData)
 {
     State* state = (State*) userData;
     SDL_GetWindowSize(state->m_window, widthOut, heightOut);
 }
 
+static bool sUpdateRenderTargetDescriptorSets(State& state)
+{
+    static const DescriptorInfo descritorSetInfos[] = {
+        DescriptorInfo(state.m_modelVerticesBuffer, 0, state.m_modelVerticesBuffer.size),
+        DescriptorInfo(state.m_uniformBuffer),
+        DescriptorInfo(getMemory().m_firstPassRendertargetImage.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, state.m_sampler),
+    };
+
+    if(!updateBindDescriptorSet(state.m_descriptorSetForSecondPass,
+        sGraphicsDescriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
+    {
+        printf("Failed to update descriptorset\n");
+        return false;
+    }
+
+
+    return true;
+}
 
 static bool sCreateRenderTargetImage(State& state)
 {
     int width = 0;
     int height = 0;
     sGetWindowSize(&width, &height, &state);
-    if(width == state.m_image.width && height == state.m_image.height)
-    {
-        return true;
-    }
-
-    destroyImage(state.m_image);
-    if(!createImage(width, height, getSwapChainFormats().defaultColorFormat,
-        VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT
-            | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        "Render target", state.m_image))
-    {
-        printf("Failed to recreate render target image\n");
-        return false;
-    }
-    return true;
+    return recreateRenderTargets(width, height);
 }
+
 static bool sCreateImages(State& state)
 {
     //VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
@@ -120,7 +172,8 @@ static bool sCreateImages(State& state)
 static void sResized(void* userData)
 {
     State* state = (State*) userData;
-    sCreateRenderTargetImage(*state);
+    state->m_whenToUpdateDescriptors = CarpVk::FramesInFlight;
+    sCreateRenderTargetImage(*state) && sUpdateRenderTargetDescriptorSets(*state);
 }
 
 static VkSurfaceKHR sCreateSurface(VkInstance instance, void* userData)
@@ -175,7 +228,7 @@ static bool sDraw(State& state)
     }
 
     {
-        imageBarrier(state.m_image,
+        imageBarrier(getMemory().m_firstPassRendertargetImage,
             VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
@@ -187,20 +240,59 @@ static bool sDraw(State& state)
         flushBarriers();
     }
 
-    RenderingAttachmentInfo colorAttachments[] =
+    RenderingAttachmentInfo firstPassColorAttachments[] =
     {
         {
             .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 0.0f } },
-            .image = &state.m_image,
+            .image = &getMemory().m_firstPassRendertargetImage,
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE
         }
     };
 
-    beginRenderPipeline(colorAttachments, ARRAYSIZES(colorAttachments), nullptr,
+    beginRenderPipeline(firstPassColorAttachments, ARRAYSIZES(firstPassColorAttachments), nullptr,
         state.m_graphicsPipelineLayout, state.m_graphicsPipeline, state.m_descriptorSet);
     vkCmdDraw(commandBuffer, 6, 1, 0, 0);
     endRenderPipeline();
+
+
+
+    {
+        //imageBarrier(state.m_sampledImage,
+        //    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_READ_BIT,
+        //    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        imageBarrier(getMemory().m_firstPassRendertargetImage,
+            VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT
+              | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+              //| VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT
+              ,
+            VK_ACCESS_2_SHADER_READ_BIT,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        imageBarrier(getMemory().m_lastPassRendertargetImage,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+        flushBarriers();
+    }
+
+    RenderingAttachmentInfo lastPassColorAttachments[] =
+    {
+        {
+            .clearValue = { .color = { 0.0f, 0.0f, 0.0f, 0.0f } },
+            .image = &getMemory().m_lastPassRendertargetImage,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE
+        }
+    };
+
+    beginRenderPipeline(lastPassColorAttachments, ARRAYSIZES(lastPassColorAttachments), nullptr,
+        state.m_graphicsPipelineLayout, state.m_secondGraphicsPipeline, state.m_descriptorSetForSecondPass);
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+    endRenderPipeline();
+
 
     return true;
 }
@@ -225,12 +317,6 @@ static uint32_t sGetColor(float r, float g, float b, float a)
     color |= (uint32_t(a * 255.0f)) << 24u;
     return color;
 }
-
-
-
-
-
-
 
 
 
@@ -300,6 +386,11 @@ static int sRun(State &state)
         printf("Failed to initialize vulkan\n");
         return 1;
     }
+    if(!initMemory())
+    {
+        printf("Failed to initialize memory\n");
+        return 1;
+    }
 
     if(!createBuffer(1024u * 1024u * 16u,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -352,37 +443,22 @@ static int sRun(State &state)
         endPreFrame();
     }
 
-    static DescriptorSetLayout graphicsDescriptorLayouts[] =
-    {
-        {
-            .bindingIndex = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT
-        },
-        {
-            .bindingIndex = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
-        },
-        {
-            .bindingIndex = 2,
-            .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            .stage = VK_SHADER_STAGE_VERTEX_BIT
-                | VK_SHADER_STAGE_FRAGMENT_BIT
-                | VK_SHADER_STAGE_COMPUTE_BIT,
-            //not working properly .immutableSampler = state.m_sampler,
-        },
-
-    };
-
     state.m_descriptorSetLayout =
-        createSetLayout(graphicsDescriptorLayouts, ARRAYSIZES(graphicsDescriptorLayouts));
+        createSetLayout(sGraphicsDescriptorLayouts, ARRAYSIZES(sGraphicsDescriptorLayouts));
 
     if(!createDescriptorSet(state.m_descriptorSetLayout, &state.m_descriptorSet))
     {
         printf("Failed to create descriptorset\n");
         return 2;
     }
+
+    if(!createDescriptorSet(state.m_descriptorSetLayout, &state.m_descriptorSetForSecondPass))
+    {
+        printf("Failed to create descriptorset\n");
+        return 2;
+    }
+
+
 
 
     state.m_uniformBuffer = createUniformBuffer(256);
@@ -397,15 +473,26 @@ static int sRun(State &state)
     };
 
     if(!updateBindDescriptorSet(state.m_descriptorSet,
-        graphicsDescriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
+        sGraphicsDescriptorLayouts, descritorSetInfos, ARRAYSIZES(descritorSetInfos)))
     {
         printf("Failed to update descriptorset\n");
         return 1;
     }
 
-    if(!createShader("assets/shader/vert.spv", state.m_shaderModules[0])
-        || !createShader("assets/shader/frag.spv", state.m_shaderModules[1])
-        || !createShader("assets/shader/compshader.spv", state.m_shaderModules[2]))
+    if(!sUpdateRenderTargetDescriptorSets(state))
+    {
+        printf("Failed to update descriptorset2\n");
+        return 1;
+    }
+
+    if(!createShader("assets/shader/vert.spv", state.m_shaderModules[ShaderTypes_TwoDVert])
+        || !createShader("assets/shader/frag.spv", state.m_shaderModules[ShaderTypes_TwoDFrag])
+
+        || !createShader("assets/shader/full_screen_vert.spv", state.m_shaderModules[ShaderTypes_FullScreenVert])
+        || !createShader("assets/shader/full_screen_frag.spv", state.m_shaderModules[ShaderTypes_FullScreenFrag])
+
+        || !createShader("assets/shader/compshader.spv", state.m_shaderModules[ShaderTypes_Compute])
+    )
     {
         printf("Failed to create shaders!\n");
         return 9;
@@ -414,8 +501,8 @@ static int sRun(State &state)
     const VkFormat colorFormats[] = { getSwapChainFormats().defaultColorFormat };
 
     const VkPipelineShaderStageCreateInfo stageInfos[] = {
-        createDefaultVertexInfo(state.m_shaderModules[0]),
-        createDefaultFragmentInfo(state.m_shaderModules[1]),
+        createDefaultVertexInfo(state.m_shaderModules[ShaderTypes_TwoDVert]),
+        createDefaultFragmentInfo(state.m_shaderModules[ShaderTypes_TwoDFrag]),
     };
 
     GPBuilder gpBuilder = {
@@ -427,6 +514,7 @@ static int sRun(State &state)
         .colorFormatCount = ARRAYSIZES(colorFormats),
         .blendChannelCount = 1,
     };
+
     state.m_graphicsPipeline = createGraphicsPipeline(gpBuilder, "Triangle graphics pipeline");
 
     if(!state.m_graphicsPipeline)
@@ -435,8 +523,23 @@ static int sRun(State &state)
         return 8;
     }
 
+    const VkPipelineShaderStageCreateInfo secondStageInfos[] = {
+        createDefaultVertexInfo(state.m_shaderModules[ShaderTypes_FullScreenVert]),
+        createDefaultFragmentInfo(state.m_shaderModules[ShaderTypes_FullScreenFrag]),
+    };
+
+    gpBuilder.stageInfos = secondStageInfos;
+    state.m_secondGraphicsPipeline = createGraphicsPipeline(gpBuilder, "Second triangle graphics pipeline");
+
+    if(!state.m_secondGraphicsPipeline)
+    {
+        printf("Failed to create graphics pipeline\n");
+        return 8;
+    }
+
+
     CPBuilder cpBuilder = {
-        .stageInfo = createDefaultComputeInfo(state.m_shaderModules[2]),
+        .stageInfo = createDefaultComputeInfo(state.m_shaderModules[ShaderTypes_Compute]),
         .pipelineLayout = state.m_graphicsPipelineLayout,
     };
 
@@ -480,7 +583,15 @@ static int sRun(State &state)
 
         beginFrame();
         sDraw(state);
-        presentImage(state.m_image);
+        presentImage(getMemory().m_lastPassRendertargetImage);
+        if(state.m_whenToUpdateDescriptors > 0)
+        {
+            --state.m_whenToUpdateDescriptors;
+            if(state.m_whenToUpdateDescriptors == 0)
+            {
+                //sUpdateRenderTargetDescriptorSets(state);
+            }
+        }
 
         static int MaxTicks = 100;
         if(++updateTick >= MaxTicks)

@@ -3,10 +3,17 @@
 
 #include <carpvkcommon.h>
 
-struct MyMemory
+struct alignas(256) MyMemory
 {
-    Image testImage;
+    Image m_firstPassRendertargetImage;
+    Image m_lastPassRendertargetImage;
+
+    bool initialized;
 };
 
 
-//bool initMemory
+bool initMemory();
+void destroyMemory();
+MyMemory& getMemory();
+
+bool recreateRenderTargets(int newWidth, int newHeight);
