@@ -76,8 +76,6 @@ struct State
 
     VkSampler m_sampler = {};
     uint64_t m_ticksAtStart = {};
-
-    int32_t m_whenToUpdateDescriptors = {};
 };
 
 
@@ -110,7 +108,7 @@ static void sGetWindowSize(int32_t* widthOut, int32_t* heightOut, void* userData
 
 static bool sUpdateRenderTargetDescriptorSets(State& state)
 {
-    static const DescriptorInfo descritorSetInfos[] = {
+    const DescriptorInfo descritorSetInfos[] = {
         DescriptorInfo(state.m_modelVerticesBuffer, 0, state.m_modelVerticesBuffer.size),
         DescriptorInfo(state.m_uniformBuffer),
         DescriptorInfo(getMemory().m_firstPassRendertargetImage.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, state.m_sampler),
@@ -172,7 +170,6 @@ static bool sCreateImages(State& state)
 static void sResized(void* userData)
 {
     State* state = (State*) userData;
-    state->m_whenToUpdateDescriptors = CarpVk::FramesInFlight;
     sCreateRenderTargetImage(*state) && sUpdateRenderTargetDescriptorSets(*state);
 }
 
@@ -289,7 +286,8 @@ static bool sDraw(State& state)
     };
 
     beginRenderPipeline(lastPassColorAttachments, ARRAYSIZES(lastPassColorAttachments), nullptr,
-        state.m_graphicsPipelineLayout, state.m_secondGraphicsPipeline, state.m_descriptorSetForSecondPass);
+        state.m_graphicsPipelineLayout, state.m_secondGraphicsPipeline,
+        state.m_descriptorSetForSecondPass);
     vkCmdDraw(commandBuffer, 3, 1, 0, 0);
     endRenderPipeline();
 
@@ -458,9 +456,6 @@ static int sRun(State &state)
         return 2;
     }
 
-
-
-
     state.m_uniformBuffer = createUniformBuffer(256);
 
 
@@ -582,16 +577,9 @@ static int sRun(State &state)
         }
 
         beginFrame();
+
         sDraw(state);
         presentImage(getMemory().m_lastPassRendertargetImage);
-        if(state.m_whenToUpdateDescriptors > 0)
-        {
-            --state.m_whenToUpdateDescriptors;
-            if(state.m_whenToUpdateDescriptors == 0)
-            {
-                //sUpdateRenderTargetDescriptorSets(state);
-            }
-        }
 
         static int MaxTicks = 100;
         if(++updateTick >= MaxTicks)
